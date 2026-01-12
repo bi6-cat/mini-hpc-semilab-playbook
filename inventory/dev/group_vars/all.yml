@@ -1,0 +1,20 @@
+# Cluster identity
+cluster_name: hpc-semi-lab
+domain_name: lab.local
+timezone: Asia/Ho_Chi_Minh
+
+# Admin
+admin_user: hpcadmin
+
+# Network
+dns_servers:
+  - 8.8.8.8
+  - 1.1.1.1
+
+# Storage
+nfs_home: /home
+nfs_proj: /proj
+
+# Slurm
+slurm_cluster_name: HPC-LAB
+slurm_state_dir: /var/spool/slurm
