@@ -81,6 +81,14 @@
         key: "{{ ansible_ssh_public_key }}"
       when: ansible_ssh_public_key is defined
 
+    - name: Configure SSH for ansible user
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin prohibit-password'
+        backup: yes
+      notify: Restart sshd
+
     # ==================== BASE PACKAGES ====================
     - name: Install EPEL repository
       ansible.builtin.dnf:
@@ -133,6 +141,15 @@
         state: started
         enabled: yes
 
+    - name: Ensure chrony.conf has correct NTP servers
+      ansible.builtin.lineinfile:
+        path: /etc/chrony.conf
+        line: "server {{ item }} iburst"
+      loop:
+        - 0.asia.pool.ntp.org
+        - 1.asia.pool.ntp.org
+      notify: Restart chronyd
+
     - name: Disable firewalld (will be configured later)
       ansible.builtin.systemd:
         name: firewalld
@@ -149,7 +166,7 @@
 
     - name: Display SELinux status
       ansible.builtin.debug:
-        msg: "SELinux set to permissive mode. Will be configured properly in later playbooks."
+        msg: "SELinux set to permissive mode. Will be configured later."
       when: selinux_change is changed
 
     # ==================== ROCKY 8 SPECIFIC ====================
@@ -159,11 +176,6 @@
         state: stopped
         enabled: no
       when: "'compute' in group_names"
-      ignore_errors: yes
-
-    - name: Set tuned profile for HPC
-      ansible.builtin.command: tuned-adm profile throughput-performance
-      changed_when: false
       ignore_errors: yes
 
     # ==================== VERIFICATION ====================
@@ -204,4 +216,9 @@
     - name: Restart sshd
       ansible.builtin.systemd:
         name: sshd
+        state: restarted
+
+    - name: Restart chronyd
+      ansible.builtin.systemd:
+        name: chronyd
         state: restarted
