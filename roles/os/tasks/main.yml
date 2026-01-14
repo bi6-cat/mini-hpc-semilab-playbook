@@ -42,6 +42,12 @@
     remote_src: yes
   when: root_authorized_keys.stat.exists
 
+- name: Configure SSH PermitRootLogin
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PermitRootLogin'
+    line: 'PermitRootLogin yes'
+  notify: Restart sshd
 
 - name: Disable kdump on compute
   ansible.builtin.systemd:
