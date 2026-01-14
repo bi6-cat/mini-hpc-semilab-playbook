@@ -5,11 +5,28 @@ timezone: Asia/Ho_Chi_Minh
 
 # Admin
 admin_user: hpcadmin
+admin_group: hpc
+
+# OS Configuration
+os_packages:
+  - git
+  - vim
+  - curl
+  - wget
+  - htop
+  - net-tools
+  - openssh-clients
+  - rsync
 
 # Network
 dns_servers:
   - 8.8.8.8
   - 1.1.1.1
+
+# FreeIPA
+freeipa_domain: lab.local
+freeipa_realm: LAB.LOCAL
+freeipa_admin_password: "Admin@1234"
 
 # Storage
 nfs_home: /home
@@ -18,3 +35,7 @@ nfs_proj: /proj
 # Slurm
 slurm_cluster_name: HPC-LAB
 slurm_state_dir: /var/spool/slurm
+slurm_log_dir: /var/log/slurm
+
+# SSH
+ssh_port: 22

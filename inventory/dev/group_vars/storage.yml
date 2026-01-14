@@ -1,0 +1,18 @@
+slurm_node_type: storage
+
+# NFS Server
+nfs_server_enabled: true
+nfs_exports:
+  - path: "{{ nfs_home }}"
+    clients: "10.0.0.0/24"
+    options: "rw,sync,no_subtree_check,no_root_squash"
+  - path: "{{ nfs_proj }}"
+    clients: "10.0.0.0/24"
+    options: "rw,sync,no_subtree_check,no_root_squash"
+
+# Disk quota
+quota_enabled: true
+
+# FreeIPA Client
+freeipa_setup: client
+freeipa_server: "head01.{{ domain_name }}"

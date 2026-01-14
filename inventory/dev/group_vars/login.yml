@@ -1,0 +1,20 @@
+slurm_node_type: login
+
+# FreeIPA Client
+freeipa_setup: client
+freeipa_server: "head01.{{ domain_name }}"
+
+# GUI Components
+gui_enabled: true
+openondemand_enabled: true
+x2go_enabled: true
+xfce_enabled: true
+
+# NFS mount points
+nfs_mounts:
+  - path: "{{ nfs_home }}"
+    server: storage01
+    opts: "rw,sync,hard,intr"
+  - path: "{{ nfs_proj }}"
+    server: storage01
+    opts: "rw,sync,hard,intr"

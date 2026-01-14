@@ -1,0 +1,20 @@
+slurm_node_type: head
+
+# FreeIPA Server
+freeipa_setup: server
+freeipa_hostname: "head01.{{ domain_name }}"
+
+# Slurm Controller
+slurm_dbd_host: "localhost"
+slurm_dbd_port: 6819
+
+# Database (MariaDB)
+mariadb_root_password: "Admin@1234"
+mariadb_slurm_password: "Admin@1234"
+
+# NFS Server
+nfs_server_enabled: false  # Head node không serve NFS, storage01 làm điều này
+
+# Monitoring
+prometheus_port: 9090
+grafana_port: 3000

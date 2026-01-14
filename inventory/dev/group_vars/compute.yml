@@ -1,0 +1,18 @@
+slurm_node_type: compute
+
+# CPU/Memory configuration
+cpu_cores: 2       
+memory_gb: 4       
+
+# Slurm settings
+slurm_cpu_count: "{{ cpu_cores }}"
+slurm_real_memory: "{{ memory_gb * 1024 }}"
+
+# NFS mount points
+nfs_mounts:
+  - path: "{{ nfs_home }}"
+    server: storage01
+    opts: "rw,sync,hard,intr"
+  - path: "{{ nfs_proj }}"
+    server: storage01
+    opts: "rw,sync,hard,intr"
