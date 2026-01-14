@@ -1,0 +1,207 @@
+- name: 00 - Bootstrap all nodes
+  hosts: all
+  gather_facts: true
+  become: true
+
+  pre_tasks:
+    - name: Ensure bootstrap is run as root
+      ansible.builtin.fail:
+        msg: "00-bootstrap must be run as root."
+      when: ansible_user_id != "root"
+
+    - name: Test connectivity
+      ansible.builtin.ping:
+
+    - name: Gather package facts
+      ansible.builtin.package_facts:
+        manager: auto
+
+    - name: Verify Rocky Linux 8
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Rocky"
+          - ansible_distribution_major_version == "8"
+        fail_msg: "This playbook is designed for Rocky Linux 8"
+        success_msg: "Running on Rocky Linux {{ ansible_distribution_version }}"
+
+  tasks:
+    # ==================== SETUP ANSIBLE USER ====================
+    - name: Create ansible group
+      ansible.builtin.group:
+        name: ansible
+        state: present
+
+    - name: Create ansible user
+      ansible.builtin.user:
+        name: ansible
+        comment: "Ansible Automation User"
+        group: ansible
+        groups: wheel
+        shell: /bin/bash
+        createhome: yes
+        state: present
+
+    - name: Configure sudoers for ansible user
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/ansible
+        content: "ansible ALL=(ALL) NOPASSWD: ALL\n"
+        owner: root
+        group: root
+        mode: '0440'
+        validate: '/usr/sbin/visudo -cf %s'
+
+    # ==================== SSH SETUP ====================
+    - name: Create .ssh directory for ansible user
+      ansible.builtin.file:
+        path: /home/ansible/.ssh
+        state: directory
+        owner: ansible
+        group: ansible
+        mode: '0700'
+
+    - name: Check if root has authorized_keys
+      ansible.builtin.stat:
+        path: /root/.ssh/authorized_keys
+      register: root_authorized_keys
+
+    - name: Copy authorized_keys from root to ansible user
+      ansible.builtin.copy:
+        src: /root/.ssh/authorized_keys
+        dest: /home/ansible/.ssh/authorized_keys
+        owner: ansible
+        group: ansible
+        mode: '0600'
+        remote_src: yes
+      when: root_authorized_keys.stat.exists
+
+    - name: Add SSH public key for ansible user (if provided)
+      ansible.posix.authorized_key:
+        user: ansible
+        state: present
+        key: "{{ ansible_ssh_public_key }}"
+      when: ansible_ssh_public_key is defined
+
+    # ==================== BASE PACKAGES ====================
+    - name: Install EPEL repository
+      ansible.builtin.dnf:
+        name: epel-release
+        state: present
+
+    - name: Install base packages
+      ansible.builtin.dnf:
+        name: "{{ os_packages }}"
+        state: present
+      retries: 3
+      delay: 5
+      register: package_install
+      until: package_install is succeeded
+
+    - name: Install Python dependencies for Ansible
+      ansible.builtin.dnf:
+        name:
+          - python3-pip
+          - python3-setuptools
+          - python3-libselinux
+          - python3-policycoreutils
+        state: present
+
+    # ==================== SYSTEM CONFIG ====================
+    - name: Set hostname
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}.{{ domain_name }}"
+        use: systemd
+
+    - name: Update /etc/hosts with cluster nodes
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        block: |
+          # HPC Cluster Nodes
+          {% for host in groups['all'] %}
+          {{ hostvars[host]['ansible_host'] }}    {{ host }}.{{ domain_name }} {{ host }}
+          {% endfor %}
+        marker: "# {mark} ANSIBLE MANAGED - HPC CLUSTER"
+        create: yes
+        backup: yes
+
+    - name: Set timezone
+      ansible.builtin.timezone:
+        name: "{{ timezone }}"
+
+    - name: Configure chronyd for time sync
+      ansible.builtin.systemd:
+        name: chronyd
+        state: started
+        enabled: yes
+
+    - name: Disable firewalld (will be configured later)
+      ansible.builtin.systemd:
+        name: firewalld
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    # ==================== SELINUX ====================
+    - name: Set SELinux to permissive (bootstrap phase)
+      ansible.posix.selinux:
+        policy: targeted
+        state: permissive
+      register: selinux_change
+
+    - name: Display SELinux status
+      ansible.builtin.debug:
+        msg: "SELinux set to permissive mode. Will be configured properly in later playbooks."
+      when: selinux_change is changed
+
+    # ==================== ROCKY 8 SPECIFIC ====================
+    - name: Disable kdump (save memory on compute nodes)
+      ansible.builtin.systemd:
+        name: kdump
+        state: stopped
+        enabled: no
+      when: "'compute' in group_names"
+      ignore_errors: yes
+
+    - name: Set tuned profile for HPC
+      ansible.builtin.command: tuned-adm profile throughput-performance
+      changed_when: false
+      ignore_errors: yes
+
+    # ==================== VERIFICATION ====================
+    - name: Test ansible user sudo access
+      ansible.builtin.command: sudo -n true
+      become: yes
+      become_user: ansible
+      changed_when: false
+      register: sudo_test
+
+    - name: Verify ansible user can execute commands
+      ansible.builtin.shell: whoami
+      become: yes
+      become_user: ansible
+      changed_when: false
+      register: whoami_test
+
+    - name: Check SELinux current mode
+      ansible.builtin.command: getenforce
+      register: selinux_mode
+      changed_when: false
+
+    # ==================== FINAL ====================
+    - name: Print bootstrap status
+      ansible.builtin.debug:
+        msg: 
+          - "✓ Bootstrap completed on {{ inventory_hostname }}"
+          - "✓ OS: Rocky Linux {{ ansible_distribution_version }}"
+          - "✓ Ansible user created and configured"
+          - "✓ SSH access configured"
+          - "✓ Sudo access verified: {{ sudo_test.rc == 0 }}"
+          - "✓ Hostname: {{ inventory_hostname }}.{{ domain_name }}"
+          - "✓ Timezone: {{ timezone }}"
+          - "✓ SELinux mode: {{ selinux_mode.stdout }}"
+          - "⚠  Next: Run subsequent playbooks with ansible user"
+
+  handlers:
+    - name: Restart sshd
+      ansible.builtin.systemd:
+        name: sshd
+        state: restarted
