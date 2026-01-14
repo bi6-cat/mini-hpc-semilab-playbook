@@ -1,0 +1,58 @@
+- name: Install EPEL repository
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+
+- name: Install base packages
+  ansible.builtin.dnf:
+    name: "{{ os_packages }}"
+    state: present
+  retries: 3
+  delay: 5
+
+- name: Install Python dependencies
+  ansible.builtin.dnf:
+    name:
+      - python3-pip
+      - python3-setuptools
+      - python3-libselinux
+      - python3-policycoreutils
+    state: present
+
+- name: Set hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}.{{ domain_name }}"
+    use: systemd
+
+- name: Update /etc/hosts
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    block: |
+      {% for host in groups['all'] %}
+      {{ hostvars[host]['ansible_host'] }}    {{ host }}.{{ domain_name }} {{ host }}
+      {% endfor %}
+    marker: "# {mark} ANSIBLE MANAGED - HPC CLUSTER"
+
+- name: Set timezone
+  ansible.builtin.timezone:
+    name: "{{ timezone }}"
+
+- name: Configure chronyd
+  ansible.builtin.systemd:
+    name: chronyd
+    state: started
+    enabled: yes
+
+- name: Configure NTP servers
+  ansible.builtin.lineinfile:
+    path: /etc/chrony.conf
+    line: "server {{ item }} iburst"
+  loop: "{{ ntp_servers }}"
+  notify: Restart chronyd
+
+- name: Disable firewalld
+  ansible.builtin.systemd:
+    name: firewalld
+    state: stopped
+    enabled: no
+  ignore_errors: yes

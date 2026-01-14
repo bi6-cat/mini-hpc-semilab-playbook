@@ -1,0 +1,64 @@
+- name: Create ansible group
+  ansible.builtin.group:
+    name: ansible
+    state: present
+
+- name: Create ansible user
+  ansible.builtin.user:
+    name: ansible
+    comment: "Ansible Automation User"
+    group: ansible
+    groups: wheel
+    shell: /bin/bash
+    createhome: yes
+
+- name: Configure sudoers
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/ansible
+    content: "ansible ALL=(ALL) NOPASSWD: ALL\n"
+    mode: '0440'
+    validate: '/usr/sbin/visudo -cf %s'
+
+- name: Create .ssh directory
+  ansible.builtin.file:
+    path: /home/ansible/.ssh
+    state: directory
+    owner: ansible
+    group: ansible
+    mode: '0700'
+
+- name: Check root authorized_keys
+  ansible.builtin.stat:
+    path: /root/.ssh/authorized_keys
+  register: root_authorized_keys
+
+- name: Copy authorized_keys to ansible
+  ansible.builtin.copy:
+    src: /root/.ssh/authorized_keys
+    dest: /home/ansible/.ssh/authorized_keys
+    owner: ansible
+    group: ansible
+    mode: '0600'
+    remote_src: yes
+  when: root_authorized_keys.stat.exists
+
+- name: Add SSH key if provided
+  ansible.posix.authorized_key:
+    user: ansible
+    key: "{{ ansible_ssh_public_key }}"
+  when: ansible_ssh_public_key is defined
+
+- name: Configure SSH PermitRootLogin
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PermitRootLogin'
+    line: 'PermitRootLogin prohibit-password'
+  notify: Restart sshd
+
+- name: Disable kdump on compute
+  ansible.builtin.systemd:
+    name: kdump
+    state: stopped
+    enabled: no
+  when: "'compute' in group_names"
+  ignore_errors: yes

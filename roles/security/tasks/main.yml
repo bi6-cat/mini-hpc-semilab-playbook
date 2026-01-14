@@ -1,0 +1,15 @@
+- name: Set SELinux mode
+  ansible.posix.selinux:
+    policy: targeted
+    state: "{{ selinux_state }}"
+  register: selinux_change
+
+- name: Display SELinux status
+  ansible.builtin.debug:
+    msg: "SELinux: {{ selinux_state }}"
+  when: selinux_change is changed
+
+- name: Check SELinux mode
+  ansible.builtin.command: getenforce
+  register: selinux_mode
+  changed_when: false
