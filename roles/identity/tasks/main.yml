@@ -1,0 +1,98 @@
+---
+- name: Wait for FreeIPA to be ready
+  ansible.builtin.wait_for:
+    port: 443
+    host: "{{ ansible_fqdn }}"
+    timeout: 120
+
+- name: Destroy existing Kerberos ticket (if any)
+  ansible.builtin.command: kdestroy -A
+  changed_when: false
+  failed_when: false
+
+- name: Get Kerberos ticket for admin
+  ansible.builtin.shell: echo "{{ freeipa_admin_password }}" | kinit admin
+  changed_when: false
+  no_log: true
+
+- name: Check if HPC group exists
+  ansible.builtin.command: ipa group-show {{ admin_group }}
+  register: group_check
+  changed_when: false
+  failed_when: false
+
+- name: Create HPC group
+  ansible.builtin.command: >
+    ipa group-add {{ admin_group }}
+    --desc='HPC Users Group'
+  when: group_check.rc != 0
+
+- name: Check if HPC admin user exists
+  ansible.builtin.command: ipa user-show {{ admin_user }}
+  register: user_check
+  changed_when: false
+  failed_when: false
+
+- name: Create HPC admin user with password
+  ansible.builtin.expect:
+    command: >
+      ipa user-add {{ admin_user }}
+      --first=HPC
+      --last=Administrator
+      --email={{ admin_user }}@{{ freeipa_domain }}
+      --shell=/bin/bash
+      --password
+    responses:
+      "Password": "{{ freeipa_admin_password }}"
+      "Enter Password again to verify": "{{ freeipa_admin_password }}"
+  when: user_check.rc != 0
+  no_log: true
+
+- name: Add user to HPC group
+  ansible.builtin.command: ipa group-add-member {{ admin_group }} --users={{ admin_user }}
+  register: group_member_result
+  changed_when: "'already a member' not in group_member_result.stderr"
+  failed_when: false
+
+- name: Check if sudo rule exists
+  ansible.builtin.command: ipa sudorule-show {{ sudo_rule_name | default('hpc-admins') }}
+  register: sudorule_check
+  changed_when: false
+  failed_when: false
+
+- name: Add sudo rule for HPC admins
+  ansible.builtin.command: >
+    ipa sudorule-add {{ sudo_rule_name | default('hpc-admins') }}
+    --desc='Allow HPC admins full sudo access'
+  when: sudorule_check.rc != 0
+
+- name: Configure sudo rule - add user group
+  ansible.builtin.command: ipa sudorule-add-user {{ sudo_rule_name | default('hpc-admins') }} --groups={{ admin_group }}
+  register: sudo_user_result
+  changed_when: "'already a member' not in sudo_user_result.stderr"
+  failed_when: false
+
+- name: Configure sudo rule - add command ALL
+  ansible.builtin.command: ipa sudorule-mod {{ sudo_rule_name | default('hpc-admins') }} --cmdcat=all
+  register: sudo_cmd_result
+  changed_when: "'Modified' in sudo_cmd_result.stdout"
+  failed_when: false
+
+- name: Configure sudo rule - add host ALL
+  ansible.builtin.command: ipa sudorule-mod {{ sudo_rule_name | default('hpc-admins') }} --hostcat=all
+  register: sudo_host_result
+  changed_when: "'Modified' in sudo_host_result.stdout"
+  failed_when: false
+
+- name: Enable sudo rule
+  ansible.builtin.command: ipa sudorule-enable {{ sudo_rule_name | default('hpc-admins') }}
+  register: sudo_enable_result
+  changed_when: "'Enabled' in sudo_enable_result.stdout"
+  failed_when: false
+
+- name: Display created resources
+  ansible.builtin.debug:
+    msg:
+      - "✓ Group: {{ admin_group }}"
+      - "✓ User: {{ admin_user }}"
+      - "✓ Sudo rule: {{ sudo_rule_name | default('hpc-admins') }}"

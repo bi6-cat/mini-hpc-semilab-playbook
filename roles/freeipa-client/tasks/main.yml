@@ -1,0 +1,73 @@
+---
+- name: Install FreeIPA client packages
+  ansible.builtin.dnf:
+    name: "{{ freeipa_client_packages }}"
+    state: present
+  retries: 3
+  delay: 5
+
+- name: Check if already enrolled
+  ansible.builtin.stat:
+    path: /etc/ipa/default.conf
+  register: ipa_client_configured
+
+- name: Configure /etc/hosts for IPA server
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: "^.* head01\\.{{ domain_name }}"
+    line: "{{ hostvars['head01']['ansible_host'] }}    head01.{{ domain_name }} head01"
+    state: present
+
+- name: Verify IPA server DNS resolution
+  ansible.builtin.command: host head1.{{ domain_name }}
+  register: dns_check
+  changed_when: false
+  failed_when: false
+
+- name: Install IPA client
+  ansible.builtin.command: >
+    ipa-client-install
+    --server=head1.{{ domain_name }}
+    --domain={{ freeipa_domain }}
+    --realm={{ freeipa_realm }}
+    --principal=admin
+    --password={{ freeipa_admin_password }}
+    --hostname={{ ansible_fqdn }}
+    --mkhomedir
+    --no-ntp
+    --force-join
+    --unattended
+  when: not ipa_client_configured.stat.exists
+  register: ipa_client_install
+  async: 600
+  poll: 10
+
+- name: Configure authselect for mkhomedir
+  ansible.builtin.command: authselect select sssd with-mkhomedir --force
+  register: authselect_result
+  changed_when: "'backup' in authselect_result.stdout"
+  failed_when: false
+
+- name: Enable and start oddjobd
+  ansible.builtin.systemd:
+    name: oddjobd
+    state: started
+    enabled: yes
+
+- name: Enable and start SSSD
+  ansible.builtin.systemd:
+    name: sssd
+    state: started
+    enabled: yes
+
+- name: Clear SSSD cache
+  ansible.builtin.command: sss_cache -E
+  when: ipa_client_install is changed
+  changed_when: false
+  failed_when: false
+
+- name: Restart SSSD to apply changes
+  ansible.builtin.systemd:
+    name: sssd
+    state: restarted
+  when: ipa_client_install is changed

@@ -1,0 +1,12 @@
+---
+# Identity management defaults
+ipa_users:
+  - username: "{{ admin_user }}"
+    givenname: HPC
+    sn: Administrator
+    mail: "{{ admin_user }}@{{ freeipa_domain }}"
+    loginshell: /bin/bash
+
+ipa_groups:
+  - name: "{{ admin_group }}"
+    description: HPC Users Group

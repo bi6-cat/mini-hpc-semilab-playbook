@@ -1,0 +1,81 @@
+---
+- name: Enable IDM module (required for FreeIPA)
+  ansible.builtin.command: dnf module enable -y idm:DL1
+  register: module_enable
+  changed_when: "'Nothing to do' not in module_enable.stdout"
+  failed_when: false
+
+- name: Install FreeIPA server packages
+  ansible.builtin.dnf:
+    name: "{{ freeipa_packages }}"
+    state: present
+  retries: 3
+  delay: 5
+
+- name: Check if FreeIPA is already configured
+  ansible.builtin.stat:
+    path: /etc/ipa/default.conf
+  register: ipa_configured
+
+- name: Generate random DM password if not set
+  ansible.builtin.set_fact:
+    freeipa_dm_password: "{{ freeipa_admin_password }}"
+  when: freeipa_dm_password is not defined
+
+- name: Install FreeIPA server
+  ansible.builtin.command: >
+    ipa-server-install
+    --realm={{ freeipa_realm }}
+    --domain={{ freeipa_domain }}
+    --ds-password={{ freeipa_dm_password }}
+    --admin-password={{ freeipa_admin_password }}
+    --hostname={{ ansible_fqdn }}
+    --setup-dns
+    --forwarder={{ dns_forwarders[0] }}
+    --forwarder={{ dns_forwarders[1] }}
+    --no-reverse
+    --mkhomedir
+    --unattended
+  when: not ipa_configured.stat.exists
+  register: ipa_install
+  async: 1800
+  poll: 10
+
+- name: Wait for IPA services to be ready
+  ansible.builtin.wait_for:
+    port: 443
+    host: "{{ ansible_fqdn }}"
+    timeout: 300
+  when: ipa_install is changed
+
+- name: Get Kerberos ticket
+  ansible.builtin.shell: echo "{{ freeipa_admin_password }}" | kinit admin
+  changed_when: false
+  no_log: true
+
+- name: Enable HBAC for all hosts
+  ansible.builtin.command: ipa hbacrule-mod allow_all --hostcat=all
+  register: hbac_result
+  changed_when: "'Modified' in hbac_result.stdout"
+  failed_when: false
+
+- name: Configure SSSD on IPA server
+  ansible.builtin.template:
+    src: sssd.conf.j2
+    dest: /etc/sssd/sssd.conf
+    owner: root
+    group: root
+    mode: '0600'
+  notify: Restart sssd
+
+- name: Enable and start SSSD
+  ansible.builtin.systemd:
+    name: sssd
+    state: started
+    enabled: yes
+
+- name: Configure authselect for mkhomedir
+  ansible.builtin.command: authselect select sssd with-mkhomedir --force
+  register: authselect_result
+  changed_when: "'backup' in authselect_result.stdout"
+  failed_when: false

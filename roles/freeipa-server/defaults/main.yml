@@ -1,0 +1,27 @@
+---
+# FreeIPA Server defaults
+freeipa_packages:
+  - ipa-server
+  - ipa-server-dns
+  - bind
+  - bind-dyndb-ldap
+
+freeipa_ports_tcp:
+  - 80
+  - 443
+  - 389
+  - 636
+  - 88
+  - 464
+  - 53
+
+freeipa_ports_udp:
+  - 88
+  - 464
+  - 53
+  - 123
+
+# DNS forwarders
+dns_forwarders:
+  - 8.8.8.8
+  - 1.1.1.1

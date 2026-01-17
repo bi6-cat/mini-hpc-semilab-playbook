@@ -1,0 +1,7 @@
+---
+# FreeIPA Client defaults
+freeipa_client_packages:
+  - ipa-client
+  - sssd
+  - sssd-tools
+  - oddjob-mkhomedir
