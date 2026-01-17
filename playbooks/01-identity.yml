@@ -1,0 +1,62 @@
+- name: 01 - Setup FreeIPA Server
+  hosts: head
+  gather_facts: true
+  become: true
+
+  pre_tasks:
+    - name: Verify network connectivity
+      ansible.builtin.ping:
+
+    - name: Check hostname resolution
+      ansible.builtin.command: hostname -f
+      register: fqdn_check
+      changed_when: false
+
+  roles:
+    - freeipa-server
+    - identity
+
+  post_tasks:
+    - name: FreeIPA server status
+      ansible.builtin.command: ipactl status
+      register: ipa_status
+      changed_when: false
+      failed_when: false
+
+    - name: Display IPA status
+      ansible.builtin.debug:
+        var: ipa_status.stdout_lines
+
+- name: 01 - Setup FreeIPA Clients
+  hosts: storage,login,compute
+  gather_facts: true
+  become: true
+  serial: 1
+
+  pre_tasks:
+    - name: Wait for FreeIPA server
+      ansible.builtin.wait_for:
+        host: "head1.{{ domain_name }}"
+        port: 443
+        timeout: 300
+
+  roles:
+    - freeipa-client
+
+  post_tasks:
+    - name: Verify IPA enrollment
+      ansible.builtin.command: ipa-client-install --version
+      register: ipa_client_version
+      changed_when: false
+
+    - name: Test SSSD authentication
+      ansible.builtin.command: id {{ admin_user }}
+      register: sssd_test
+      changed_when: false
+      failed_when: false
+
+    - name: Enrollment status
+      ansible.builtin.debug:
+        msg:
+          - "✓ {{ inventory_hostname }} enrolled to FreeIPA"
+          - "✓ SSSD: {{ 'OK' if sssd_test.rc == 0 else 'Pending' }}"
