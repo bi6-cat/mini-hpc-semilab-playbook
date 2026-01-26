@@ -5,7 +5,7 @@ timezone: Asia/Ho_Chi_Minh
 
 # Admin
 admin_user: hpcadmin
-admin_group: hpc
+admin_group: hpcadmin
 
 # OS Configuration
 os_packages:
