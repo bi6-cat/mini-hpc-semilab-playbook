@@ -7,7 +7,6 @@
 - name: Display SELinux status
   ansible.builtin.debug:
     msg: "SELinux: {{ selinux_state }}"
-  when: selinux_change is changed
 
 - name: Check SELinux mode
   ansible.builtin.command: getenforce

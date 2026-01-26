@@ -12,7 +12,7 @@
     shell: /bin/bash
     createhome: yes
 
-- name: Configure sudoers
+- name: Configure sudoers for ansible user
   ansible.builtin.copy:
     dest: /etc/sudoers.d/ansible
     content: "ansible ALL=(ALL) NOPASSWD: ALL\n"
@@ -27,32 +27,25 @@
     group: ansible
     mode: '0700'
 
-- name: Check root authorized_keys
-  ansible.builtin.stat:
-    path: /root/.ssh/authorized_keys
-  register: root_authorized_keys
+- name: Ensure .ssh directory exists for managed users
+  ansible.builtin.file:
+    path: "/home/{{ item }}/.ssh"
+    state: directory
+    owner: "{{ item }}"
+    group: "{{ item }}"
+    mode: '0700'
+  loop: "{{ os_ssh_authorized_users }}"
 
-- name: Copy authorized_keys to ansible
+- name: Install control-node public key for managed users
+  ansible.builtin.authorized_key:
+    user: "{{ item }}"
+    state: present
+    key: "{{ lookup('file', os_ssh_pubkey_path) }}"
+  loop: "{{ os_ssh_authorized_users }}"
+
+- name: Configure sudoers for hpcadmin user
   ansible.builtin.copy:
-    src: /root/.ssh/authorized_keys
-    dest: /home/ansible/.ssh/authorized_keys
-    owner: ansible
-    group: ansible
-    mode: '0600'
-    remote_src: yes
-  when: root_authorized_keys.stat.exists
-
-- name: Configure SSH PermitRootLogin
-  ansible.builtin.lineinfile:
-    path: /etc/ssh/sshd_config
-    regexp: '^#?PermitRootLogin'
-    line: 'PermitRootLogin yes'
-  notify: Restart sshd
-
-- name: Disable kdump on compute
-  ansible.builtin.systemd:
-    name: kdump
-    state: stopped
-    enabled: no
-  when: "'compute' in group_names"
-  ignore_errors: yes
+    dest: /etc/sudoers.d/hpcadmin
+    content: "hpcadmin ALL=(ALL) NOPASSWD: ALL\n"
+    mode: '0440'
+    validate: '/usr/sbin/visudo -cf %s'
