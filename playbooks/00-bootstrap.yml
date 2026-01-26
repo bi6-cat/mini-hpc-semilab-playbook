@@ -4,11 +4,6 @@
   become: true
 
   pre_tasks:
-    - name: Ensure run as root
-      ansible.builtin.fail:
-        msg: "Must run as root"
-      when: ansible_user_id != "root"
-
     - name: Test connectivity
       ansible.builtin.ping:
 
@@ -34,7 +29,7 @@
     - name: Bootstrap status
       ansible.builtin.debug:
         msg:
-          - "✓ {{ inventory_hostname }} completed"
-          - "✓ Hostname: {{ inventory_hostname }}.{{ domain_name }}"
-          - "✓ SELinux: {{ selinux_mode.stdout }}"
-          - "⚠ Next: Run with ansible user"
+          - "-- {{ inventory_hostname }} completed"
+          - "-- Hostname: {{ inventory_hostname }}.{{ domain_name }}"
+          - "-- SELinux: {{ selinux_mode.stdout }}"
+          - "** Next: Run with ansible user**"

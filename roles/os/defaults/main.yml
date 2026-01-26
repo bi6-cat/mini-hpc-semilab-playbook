@@ -1,0 +1,6 @@
+os_ssh_pubkey_path: /home/hpcadmin/.ssh/id_ed25519.pub
+
+# Các user được nhận public key vào authorized_keys
+os_ssh_authorized_users:
+  - hpcadmin
+  - ansible
