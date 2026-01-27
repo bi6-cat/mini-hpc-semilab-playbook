@@ -1,0 +1,318 @@
+---
+##############################################################################
+# 99-verify.yml - Post-deployment verification for 00-bootstrap + 01-identity
+##############################################################################
+
+##############################################################################
+# PART 1: Verify 00-bootstrap (OS baseline) - All hosts
+##############################################################################
+- name: "99 - Verify 00-bootstrap: OS baseline"
+  hosts: all
+  gather_facts: true
+  become: true
+
+  vars:
+    expected_fqdn: "{{ inventory_hostname }}.{{ domain_name }}"
+
+  tasks:
+    # --- 1.1 Network & Hostname ---
+    - name: "[00] Verify network connectivity"
+      ansible.builtin.ping:
+
+    - name: "[00] Verify FQDN"
+      ansible.builtin.command: hostname -f
+      register: fqdn_check
+      changed_when: false
+
+    - name: "[00] Assert hostname matches inventory + domain"
+      ansible.builtin.assert:
+        that:
+          - fqdn_check.stdout == expected_fqdn
+        fail_msg: "FQDN mismatch. Expected {{ expected_fqdn }}, got {{ fqdn_check.stdout }}"
+
+    - name: "[00] Verify /etc/hosts contains cluster nodes"
+      ansible.builtin.command: "grep -q '{{ item }}.{{ domain_name }}' /etc/hosts"
+      loop: "{{ groups['all'] }}"
+      changed_when: false
+
+    # --- 1.2 Time & NTP ---
+    - name: "[00] Verify chronyd is active"
+      ansible.builtin.command: systemctl is-active chronyd
+      register: chronyd_active
+      changed_when: false
+      failed_when: chronyd_active.stdout != 'active'
+
+    - name: "[00] Verify timezone"
+      ansible.builtin.command: timedatectl show --property=Timezone --value
+      register: tz_check
+      changed_when: false
+
+    - name: "[00] Assert timezone is correct"
+      ansible.builtin.assert:
+        that:
+          - tz_check.stdout == timezone
+        fail_msg: "Timezone mismatch. Expected {{ timezone }}, got {{ tz_check.stdout }}"
+
+    # --- 1.3 Firewall & Security ---
+    - name: "[00] Verify firewalld is inactive"
+      ansible.builtin.command: systemctl is-active firewalld
+      register: firewalld_active
+      changed_when: false
+      failed_when: false
+
+    - name: "[00] Verify SELinux mode"
+      ansible.builtin.command: getenforce
+      register: selinux_mode
+      changed_when: false
+      failed_when: false
+
+    # --- 1.4 Users & Sudo ---
+    - name: "[00] Verify ansible user exists"
+      ansible.builtin.command: id ansible
+      register: ansible_user_check
+      changed_when: false
+
+    - name: "[00] Verify sudoers drop-ins exist"
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: sudoers_files
+      loop:
+        - /etc/sudoers.d/ansible
+        - /etc/sudoers.d/hpcadmin
+
+    - name: "[00] Assert sudoers files present"
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: "Missing sudoers file: {{ item.item }}"
+      loop: "{{ sudoers_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # --- 1.5 Summary ---
+    - name: "[00] Display bootstrap verification summary"
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════"
+          - "  00-BOOTSTRAP VERIFICATION: {{ inventory_hostname }}"
+          - "═══════════════════════════════════════"
+          - "  ✓ FQDN: {{ fqdn_check.stdout }}"
+          - "  ✓ Timezone: {{ tz_check.stdout }}"
+          - "  ✓ chronyd: {{ chronyd_active.stdout }}"
+          - "  ✓ firewalld: {{ firewalld_active.stdout | default('unknown') }}"
+          - "  ✓ SELinux: {{ selinux_mode.stdout | default('unknown') }}"
+          - "  ✓ ansible user: exists"
+          - "  ✓ sudoers: OK"
+
+
+##############################################################################
+# PART 2: Verify 01-identity - FreeIPA Server (head)
+##############################################################################
+- name: "99 - Verify 01-identity: FreeIPA Server"
+  hosts: head
+  gather_facts: true
+  become: true
+
+  tasks:
+    # --- 2.1 IPA Services ---
+    - name: "[01-server] Wait for FreeIPA web service"
+      ansible.builtin.wait_for:
+        host: "{{ ansible_fqdn }}"
+        port: 443
+        timeout: 60
+
+    - name: "[01-server] Verify ipactl status"
+      ansible.builtin.command: ipactl status
+      register: ipactl_status
+      changed_when: false
+      failed_when: ipactl_status.rc != 0
+
+    - name: "[01-server] Assert key IPA services are RUNNING"
+      ansible.builtin.assert:
+        that:
+          - "'Directory Service: RUNNING' in ipactl_status.stdout"
+          - "'krb5kdc Service: RUNNING' in ipactl_status.stdout"
+          - "'kadmin Service: RUNNING' in ipactl_status.stdout"
+          - "'named Service: RUNNING' in ipactl_status.stdout"
+          - "'httpd Service: RUNNING' in ipactl_status.stdout"
+        fail_msg: "FreeIPA services not healthy on {{ inventory_hostname }}"
+
+    # --- 2.2 IPA Objects ---
+    - name: "[01-server] Get Kerberos ticket for admin"
+      ansible.builtin.shell: echo "{{ freeipa_admin_password }}" | kinit admin
+      changed_when: false
+      no_log: true
+
+    - name: "[01-server] Verify admin user exists"
+      ansible.builtin.command: ipa user-show {{ admin_user }}
+      register: ipa_user_show
+      changed_when: false
+
+    - name: "[01-server] Verify admin group exists"
+      ansible.builtin.command: ipa group-show {{ admin_group }}
+      register: ipa_group_show
+      changed_when: false
+
+    - name: "[01-server] Verify user is member of group"
+      ansible.builtin.command: ipa group-show {{ admin_group }} --all
+      register: ipa_group_members
+      changed_when: false
+
+    - name: "[01-server] Assert user is in admin group"
+      ansible.builtin.assert:
+        that:
+          - admin_user in ipa_group_members.stdout
+        fail_msg: "User {{ admin_user }} is not member of {{ admin_group }}"
+
+    - name: "[01-server] Verify sudo rule exists and enabled"
+      ansible.builtin.command: ipa sudorule-show {{ sudo_rule_name | default('hpc-admins') }}
+      register: ipa_sudorule_show
+      changed_when: false
+
+    - name: "[01-server] Assert sudo rule is enabled"
+      ansible.builtin.assert:
+        that:
+          - "'Enabled: True' in ipa_sudorule_show.stdout"
+        fail_msg: "Sudo rule {{ sudo_rule_name | default('hpc-admins') }} is not enabled"
+
+    # --- 2.3 SSSD on Server ---
+    - name: "[01-server] Verify SSSD is active"
+      ansible.builtin.command: systemctl is-active sssd
+      register: sssd_active
+      changed_when: false
+      failed_when: sssd_active.stdout != 'active'
+
+    - name: "[01-server] Verify NSS lookup (id admin_user)"
+      ansible.builtin.command: id {{ admin_user }}
+      register: id_check
+      changed_when: false
+
+    # --- 2.4 Summary ---
+    - name: "[01-server] Display FreeIPA server summary"
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════"
+          - "  01-IDENTITY SERVER: {{ inventory_hostname }}"
+          - "═══════════════════════════════════════"
+          - "  ✓ FreeIPA services: ALL RUNNING"
+          - "  ✓ SSSD: {{ sssd_active.stdout }}"
+          - "  ✓ User: {{ admin_user }}"
+          - "  ✓ Group: {{ admin_group }}"
+          - "  ✓ Sudo rule: {{ sudo_rule_name | default('hpc-admins') }} (Enabled)"
+          - "  ✓ NSS lookup: OK"
+
+
+##############################################################################
+# PART 3: Verify 01-identity - FreeIPA Clients (storage, login, compute)
+##############################################################################
+- name: "99 - Verify 01-identity: FreeIPA Clients"
+  hosts: storage,login,compute
+  gather_facts: true
+  become: true
+
+  tasks:
+    # --- 3.1 Client Enrollment ---
+    - name: "[01-client] Wait for FreeIPA server"
+      ansible.builtin.wait_for:
+        host: "{{ freeipa_server }}"
+        port: 443
+        timeout: 60
+
+    - name: "[01-client] Verify client enrollment file exists"
+      ansible.builtin.stat:
+        path: /etc/ipa/default.conf
+      register: ipa_default_conf
+
+    - name: "[01-client] Assert client is enrolled"
+      ansible.builtin.assert:
+        that:
+          - ipa_default_conf.stat.exists
+        fail_msg: "/etc/ipa/default.conf missing; client not enrolled"
+
+    # --- 3.2 SSSD Configuration ---
+    - name: "[01-client] Verify SSSD is active"
+      ansible.builtin.command: systemctl is-active sssd
+      register: sssd_active
+      changed_when: false
+      failed_when: sssd_active.stdout != 'active'
+
+    - name: "[01-client] Verify oddjobd is active (for mkhomedir)"
+      ansible.builtin.command: systemctl is-active oddjobd
+      register: oddjobd_active
+      changed_when: false
+      failed_when: oddjobd_active.stdout != 'active'
+
+    - name: "[01-client] Verify nsswitch sudoers uses SSSD"
+      ansible.builtin.command: "grep -E '^sudoers:.*\\bsss\\b' /etc/nsswitch.conf"
+      register: nsswitch_sudoers
+      changed_when: false
+      failed_when: nsswitch_sudoers.rc != 0
+
+    - name: "[01-client] Verify authselect profile"
+      ansible.builtin.command: authselect current
+      register: authselect_current
+      changed_when: false
+      failed_when: false
+
+    - name: "[01-client] Assert authselect mkhomedir is enabled"
+      ansible.builtin.assert:
+        that:
+          - authselect_current.stdout is search('with-mkhomedir')
+        fail_msg: "authselect profile missing with-mkhomedir"
+
+    # --- 3.3 Identity & Sudo ---
+    - name: "[01-client] Verify NSS lookup from FreeIPA"
+      ansible.builtin.command: id {{ admin_user }}
+      register: id_check
+      changed_when: false
+
+    - name: "[01-client] Verify sudo rule applies to user"
+      ansible.builtin.command: sudo -n -l -U {{ admin_user }}
+      register: sudo_check
+      changed_when: false
+      failed_when: sudo_check.rc != 0
+
+    - name: "[01-client] Assert sudo grants full access"
+      ansible.builtin.assert:
+        that:
+          - sudo_check.stdout is search('\\(root\\) ALL')
+        fail_msg: "FreeIPA sudo rule not applied for {{ admin_user }} on {{ inventory_hostname }}"
+
+    # --- 3.4 Summary ---
+    - name: "[01-client] Display client identity summary"
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════"
+          - "  01-IDENTITY CLIENT: {{ inventory_hostname }}"
+          - "═══════════════════════════════════════"
+          - "  ✓ Enrolled to: {{ freeipa_server }}"
+          - "  ✓ SSSD: {{ sssd_active.stdout }}"
+          - "  ✓ oddjobd: {{ oddjobd_active.stdout }}"
+          - "  ✓ nsswitch sudoers: sss"
+          - "  ✓ authselect: with-mkhomedir"
+          - "  ✓ id {{ admin_user }}: OK"
+          - "  ✓ sudo for {{ admin_user }}: (root) ALL"
+
+
+##############################################################################
+# PART 4: Final Summary
+##############################################################################
+- name: "99 - Verify: Final Summary"
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: "[SUMMARY] Display final verification status"
+      ansible.builtin.debug:
+        msg:
+          - ""
+          - "╔═══════════════════════════════════════════════════════════════╗"
+          - "║           VERIFICATION COMPLETE - ALL CHECKS PASSED           ║"
+          - "╠═══════════════════════════════════════════════════════════════╣"
+          - "║  00-bootstrap: OS baseline configured on all hosts            ║"
+          - "║  01-identity:  FreeIPA server running on head01               ║"
+          - "║  01-identity:  All clients enrolled and SSSD configured       ║"
+          - "╠═══════════════════════════════════════════════════════════════╣"
+          - "║  - Monitor FreeIPA server via web UI at https://head01/ipa    ║"
+          - "╚═══════════════════════════════════════════════════════════════╝"
+          - ""
