@@ -4,8 +4,8 @@ domain_name: lab.local
 timezone: Asia/Ho_Chi_Minh
 
 # Admin
-admin_user: hpcadmin
-admin_group: hpcadmin
+admin_user: ipaadmin
+admin_group: ipaadmins
 
 # OS Configuration
 os_packages:
@@ -18,7 +18,7 @@ os_packages:
   - openssh-clients
   - rsync
   - python3-pexpect
-  
+
 # Network
 dns_servers:
   - 8.8.8.8
