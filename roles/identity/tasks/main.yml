@@ -46,13 +46,15 @@
       "Password": "{{ freeipa_admin_password }}"
       "Enter Password again to verify": "{{ freeipa_admin_password }}"
   when: user_check.rc != 0
-  no_log: true
+  no_log: false
 
 - name: Add user to HPC group
   ansible.builtin.command: ipa group-add-member {{ admin_group }} --users={{ admin_user }}
   register: group_member_result
-  changed_when: "'already a member' not in group_member_result.stderr"
-  failed_when: false
+  failed_when:
+    - group_member_result.rc != 0
+    - "'already a member' not in group_member_result.stdout"
+  changed_when: "'Number of members added 1' in group_member_result.stdout"
 
 - name: Check if sudo rule exists
   ansible.builtin.command: ipa sudorule-show {{ sudo_rule_name | default('hpc-admins') }}
@@ -66,11 +68,18 @@
     --desc='Allow HPC admins full sudo access'
   when: sudorule_check.rc != 0
 
+- name: Check sudo rule configuration
+  ansible.builtin.command: ipa sudorule-show {{ sudo_rule_name | default('hpc-admins') }} --all
+  register: sudorule_details
+  changed_when: false
+  failed_when: false
+  when: sudorule_check.rc == 0
+
 - name: Configure sudo rule - add user group
   ansible.builtin.command: ipa sudorule-add-user {{ sudo_rule_name | default('hpc-admins') }} --groups={{ admin_group }}
+  when: sudorule_check.rc == 0 and admin_group not in sudorule_details.stdout
   register: sudo_user_result
-  changed_when: "'already a member' not in sudo_user_result.stderr"
-  failed_when: false
+  changed_when: true
 
 - name: Configure sudo rule - add command ALL
   ansible.builtin.command: ipa sudorule-mod {{ sudo_rule_name | default('hpc-admins') }} --cmdcat=all
@@ -84,11 +93,15 @@
   changed_when: "'Modified' in sudo_host_result.stdout"
   failed_when: false
 
+- name: Check sudo rule status
+  ansible.builtin.command: ipa sudorule-show {{ sudo_rule_name | default('hpc-admins') }}
+  register: sudo_rule_info
+  changed_when: false
+
 - name: Enable sudo rule
   ansible.builtin.command: ipa sudorule-enable {{ sudo_rule_name | default('hpc-admins') }}
-  register: sudo_enable_result
-  changed_when: "'Enabled' in sudo_enable_result.stdout"
-  failed_when: false
+  when: "'Enabled: True' not in sudo_rule_info.stdout"  
+  changed_when: true
 
 - name: Display created resources
   ansible.builtin.debug:

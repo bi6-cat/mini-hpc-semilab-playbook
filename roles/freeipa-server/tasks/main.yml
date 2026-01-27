@@ -74,8 +74,12 @@
     state: started
     enabled: yes
 
-- name: Configure authselect for mkhomedir
-  ansible.builtin.command: authselect select sssd with-mkhomedir --force
-  register: authselect_result
-  changed_when: "'backup' in authselect_result.stdout"
-  failed_when: false
+- name: Check authselect current profile
+  ansible.builtin.command: authselect current
+  register: authselect_current
+  changed_when: false
+
+- name: Enable mkhomedir if missing
+  ansible.builtin.command: authselect select sssd with-mkhomedir
+  when: "'with-mkhomedir' not in authselect_current.stdout"
+

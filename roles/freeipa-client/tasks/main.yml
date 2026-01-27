@@ -14,8 +14,8 @@
 - name: Configure /etc/hosts for IPA server
   ansible.builtin.lineinfile:
     path: /etc/hosts
-    regexp: "^.* {{ freeipa_server }}"
-    line: "{{ hostvars['head01']['ansible_host'] }}    host {{ freeipa_server }} {{ freeipa_server }}"
+    regexp: '^\s*\d+\.\d+\.\d+\.\d+\s+{{ freeipa_server | regex_escape() }}(\s|$)'
+    line: "{{ hostvars['head01']['ansible_host'] }} {{ freeipa_server }} head01"
     state: present
 
 - name: Verify IPA server DNS resolution
@@ -43,10 +43,10 @@
   poll: 10
 
 - name: Configure authselect for mkhomedir
-  ansible.builtin.command: authselect select sssd with-mkhomedir --force
+  ansible.builtin.command: authselect select sssd with-mkhomedir
   register: authselect_result
-  changed_when: "'backup' in authselect_result.stdout"
-  failed_when: false
+  changed_when: "'Profile was selected' in authselect_result.stdout"
+  failed_when: authselect_result.rc != 0
 
 - name: Enable and start oddjobd
   ansible.builtin.systemd:
@@ -59,6 +59,25 @@
     name: sssd
     state: started
     enabled: yes
+
+- name: Ensure sudo uses SSSD (sudo rules from FreeIPA)
+  ansible.builtin.lineinfile:
+    path: /etc/nsswitch.conf
+    regexp: '^sudoers:'
+    line: 'sudoers: files sss'
+  register: nsswitch_sudoers
+
+- name: Restart SSSD to apply nsswitch sudoers change
+  ansible.builtin.systemd:
+    name: sssd
+    state: restarted
+  when: nsswitch_sudoers is changed
+
+- name: Clear SSSD cache (sudo rules)
+  ansible.builtin.command: sss_cache -E
+  when: nsswitch_sudoers is changed
+  changed_when: false
+  failed_when: false
 
 - name: Clear SSSD cache
   ansible.builtin.command: sss_cache -E
