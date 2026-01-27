@@ -42,10 +42,17 @@
   async: 600
   poll: 10
 
+- name: Check authselect current profile
+  ansible.builtin.command: authselect current
+  register: authselect_current
+  changed_when: false
+  failed_when: false
+
 - name: Configure authselect for mkhomedir
-  ansible.builtin.command: authselect select sssd with-mkhomedir
+  ansible.builtin.command: authselect select sssd with-mkhomedir --force
   register: authselect_result
-  changed_when: "'Profile was selected' in authselect_result.stdout"
+  when: authselect_current.rc != 0 or 'with-mkhomedir' not in authselect_current.stdout
+  changed_when: true
   failed_when: authselect_result.rc != 0
 
 - name: Enable and start oddjobd
