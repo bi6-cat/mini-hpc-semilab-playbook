@@ -14,12 +14,12 @@
 - name: Configure /etc/hosts for IPA server
   ansible.builtin.lineinfile:
     path: /etc/hosts
-    regexp: "^.* head01\\.{{ domain_name }}"
-    line: "{{ hostvars['head01']['ansible_host'] }}    head01.{{ domain_name }} head01"
+    regexp: "^.* {{ freeipa_server }}"
+    line: "{{ hostvars['head01']['ansible_host'] }}    host {{ freeipa_server }} {{ freeipa_server }}"
     state: present
 
 - name: Verify IPA server DNS resolution
-  ansible.builtin.command: host head1.{{ domain_name }}
+  ansible.builtin.command: host {{ freeipa_server }}
   register: dns_check
   changed_when: false
   failed_when: false
@@ -27,7 +27,7 @@
 - name: Install IPA client
   ansible.builtin.command: >
     ipa-client-install
-    --server=head1.{{ domain_name }}
+    --server={{ freeipa_server }}
     --domain={{ freeipa_domain }}
     --realm={{ freeipa_realm }}
     --principal=admin

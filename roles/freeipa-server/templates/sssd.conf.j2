@@ -5,9 +5,10 @@ domains = {{ freeipa_domain }}
 
 [domain/{{ freeipa_domain }}]
 id_provider = ipa
-ipa_server = {{ ansible_fqdn }}
+ipa_server = {{ freeipa_hostname | default(ansible_fqdn) }}
+ipa_hostname = {{ freeipa_hostname | default(ansible_fqdn) }}
 ipa_domain = {{ freeipa_domain }}
-ipa_hostname = {{ ansible_fqdn }}
+ipa_server_mode = True
 auth_provider = ipa
 chpass_provider = ipa
 access_provider = ipa

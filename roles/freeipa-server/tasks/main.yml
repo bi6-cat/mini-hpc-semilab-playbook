@@ -17,7 +17,7 @@
     path: /etc/ipa/default.conf
   register: ipa_configured
 
-- name: Generate random DM password if not set
+- name: Set DM password if not set
   ansible.builtin.set_fact:
     freeipa_dm_password: "{{ freeipa_admin_password }}"
   when: freeipa_dm_password is not defined

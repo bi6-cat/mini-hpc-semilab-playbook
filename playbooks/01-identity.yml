@@ -36,7 +36,7 @@
   pre_tasks:
     - name: Wait for FreeIPA server
       ansible.builtin.wait_for:
-        host: "head1.{{ domain_name }}"
+        host: "{{ freeipa_server }}"
         port: 443
         timeout: 300
 

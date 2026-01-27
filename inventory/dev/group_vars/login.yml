@@ -2,7 +2,6 @@ slurm_node_type: login
 
 # FreeIPA Client
 freeipa_setup: client
-freeipa_server: "head01.{{ domain_name }}"
 
 # GUI Components
 gui_enabled: true

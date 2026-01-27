@@ -17,7 +17,8 @@ os_packages:
   - net-tools
   - openssh-clients
   - rsync
-
+  - python3-pexpect
+  
 # Network
 dns_servers:
   - 8.8.8.8
@@ -27,6 +28,7 @@ dns_servers:
 freeipa_domain: lab.local
 freeipa_realm: LAB.LOCAL
 freeipa_admin_password: "Admin@1234"
+freeipa_server: "head01.{{ domain_name }}"
 
 # Storage
 nfs_home: /home

@@ -2,7 +2,6 @@ slurm_node_type: head
 
 # FreeIPA Server
 freeipa_setup: server
-freeipa_hostname: "head01.{{ domain_name }}"
 
 # Slurm Controller
 slurm_dbd_host: "localhost"

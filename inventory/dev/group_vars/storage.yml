@@ -15,4 +15,3 @@ quota_enabled: true
 
 # FreeIPA Client
 freeipa_setup: client
-freeipa_server: "head01.{{ domain_name }}"
