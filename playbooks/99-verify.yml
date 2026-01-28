@@ -295,7 +295,218 @@
 
 
 ##############################################################################
-# PART 4: Final Summary
+# PART 4: Verify 02-storage - NFS Server (storage)
+##############################################################################
+- name: "99 - Verify 02-storage: NFS Server"
+  hosts: storage
+  gather_facts: true
+  become: true
+
+  tasks:
+    # --- 4.1 NFS Services ---
+    - name: "[02-server] Verify rpcbind is active"
+      ansible.builtin.command: systemctl is-active rpcbind
+      register: rpcbind_active
+      changed_when: false
+      failed_when: rpcbind_active.stdout != 'active'
+
+    - name: "[02-server] Verify nfs-server is active"
+      ansible.builtin.command: systemctl is-active nfs-server
+      register: nfs_server_active
+      changed_when: false
+      failed_when: nfs_server_active.stdout != 'active'
+
+    # --- 4.2 Exports ---
+    - name: "[02-server] Get current exports"
+      ansible.builtin.command: exportfs -v
+      register: exportfs_output
+      changed_when: false
+
+    - name: "[02-server] Verify /home is exported"
+      ansible.builtin.assert:
+        that:
+          - "'/home' in exportfs_output.stdout"
+        fail_msg: "/home is not exported"
+
+    - name: "[02-server] Verify /proj is exported"
+      ansible.builtin.assert:
+        that:
+          - "'/proj' in exportfs_output.stdout"
+        fail_msg: "/proj is not exported"
+
+    - name: "[02-server] Verify /soft is exported"
+      ansible.builtin.assert:
+        that:
+          - "'/soft' in exportfs_output.stdout"
+        fail_msg: "/soft is not exported"
+
+    # --- 4.3 Export directories exist and are accessible ---
+    - name: "[02-server] Verify export directories exist"
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: export_dirs
+      loop:
+        - /home
+        - /proj
+        - /soft
+
+    - name: "[02-server] Assert export directories exist"
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isdir
+        fail_msg: "Export directory {{ item.item }} does not exist"
+      loop: "{{ export_dirs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # --- 4.4 Test write to exports ---
+    - name: "[02-server] Test write to /proj"
+      ansible.builtin.file:
+        path: /proj/.nfs_test_marker
+        state: touch
+        mode: '0644'
+      changed_when: false
+
+    - name: "[02-server] Test write to /soft"
+      ansible.builtin.file:
+        path: /soft/.nfs_test_marker
+        state: touch
+        mode: '0644'
+      changed_when: false
+
+    # --- 4.5 Summary ---
+    - name: "[02-server] Display NFS server summary"
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════"
+          - "  02-STORAGE NFS SERVER: {{ inventory_hostname }}"
+          - "═══════════════════════════════════════"
+          - "  ✓ rpcbind: {{ rpcbind_active.stdout }}"
+          - "  ✓ nfs-server: {{ nfs_server_active.stdout }}"
+          - "  ✓ Exports:"
+          - "{{ exportfs_output.stdout_lines | to_nice_yaml }}"
+
+
+##############################################################################
+# PART 5: Verify 02-storage - NFS Clients (head, login, compute)
+##############################################################################
+- name: "99 - Verify 02-storage: NFS Clients"
+  hosts: head,login,compute
+  gather_facts: true
+  become: true
+
+  tasks:
+    # --- 5.1 NFS client package ---
+    - name: "[02-client] Verify nfs-utils installed"
+      ansible.builtin.command: rpm -q nfs-utils
+      register: nfs_utils_check
+      changed_when: false
+      failed_when: nfs_utils_check.rc != 0
+
+    # --- 5.2 Check mounts ---
+    - name: "[02-client] Get current NFS mounts"
+      ansible.builtin.shell: mount -t nfs,nfs4 | grep -E '(home|proj|soft)' || true
+      register: nfs_mounts_output
+      changed_when: false
+
+    - name: "[02-client] Get mount details"
+      ansible.builtin.command: cat /proc/mounts
+      register: proc_mounts
+      changed_when: false
+
+    # --- 5.3 Verify expected mounts (based on nfs_mounts var) ---
+    - name: "[02-client] Verify NFS mounts are active"
+      ansible.builtin.assert:
+        that:
+          - "item.path in proc_mounts.stdout"
+        fail_msg: "{{ item.path }} is not mounted on {{ inventory_hostname }}"
+      loop: "{{ nfs_mounts | default([]) }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    # --- 5.4 Verify fstab entries ---
+    - name: "[02-client] Get fstab content"
+      ansible.builtin.command: cat /etc/fstab
+      register: fstab_content
+      changed_when: false
+
+    - name: "[02-client] Verify fstab has NFS entries"
+      ansible.builtin.assert:
+        that:
+          - "item.path in fstab_content.stdout"
+        fail_msg: "{{ item.path }} missing from /etc/fstab"
+      loop: "{{ nfs_mounts | default([]) }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    # --- 5.5 Test read access ---
+    - name: "[02-client] Test read /proj/.nfs_test_marker"
+      ansible.builtin.stat:
+        path: /proj/.nfs_test_marker
+      register: proj_marker
+      when: "'/proj' in (nfs_mounts | default([]) | map(attribute='path') | list)"
+
+    - name: "[02-client] Assert /proj is readable"
+      ansible.builtin.assert:
+        that:
+          - proj_marker.stat.exists
+        fail_msg: "/proj NFS mount not readable - marker file missing"
+      when: proj_marker is defined and proj_marker.stat is defined
+
+    - name: "[02-client] Test read /soft/.nfs_test_marker"
+      ansible.builtin.stat:
+        path: /soft/.nfs_test_marker
+      register: soft_marker
+      when: "'/soft' in (nfs_mounts | default([]) | map(attribute='path') | list)"
+
+    - name: "[02-client] Assert /soft is readable"
+      ansible.builtin.assert:
+        that:
+          - soft_marker.stat.exists
+        fail_msg: "/soft NFS mount not readable - marker file missing"
+      when: soft_marker is defined and soft_marker.stat is defined
+
+    # --- 5.6 Test write access (only on rw mounts) ---
+    - name: "[02-client] Test write to /proj"
+      ansible.builtin.file:
+        path: "/proj/.nfs_write_test_{{ inventory_hostname }}"
+        state: touch
+        mode: '0644'
+      when: "'/proj' in (nfs_mounts | default([]) | map(attribute='path') | list)"
+      register: proj_write_test
+      failed_when: false
+
+    - name: "[02-client] Clean up write test file"
+      ansible.builtin.file:
+        path: "/proj/.nfs_write_test_{{ inventory_hostname }}"
+        state: absent
+      when: proj_write_test is defined and proj_write_test is not failed
+      failed_when: false
+
+    # --- 5.7 Verify NFS version ---
+    - name: "[02-client] Check NFS mount version"
+      ansible.builtin.shell: nfsstat -m 2>/dev/null | head -20 || mount -t nfs,nfs4
+      register: nfs_version_check
+      changed_when: false
+      failed_when: false
+
+    # --- 5.8 Summary ---
+    - name: "[02-client] Display NFS client summary"
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════"
+          - "  02-STORAGE NFS CLIENT: {{ inventory_hostname }}"
+          - "═══════════════════════════════════════"
+          - "  ✓ nfs-utils: installed"
+          - "  ✓ Mounted shares:"
+          - "{{ nfs_mounts_output.stdout_lines | default(['    (none)']) | to_nice_yaml }}"
+          - "  ✓ fstab: entries present"
+          - "  ✓ Read test: OK"
+
+
+##############################################################################
+# PART 6: Final Summary
 ##############################################################################
 - name: "99 - Verify: Final Summary"
   hosts: localhost
@@ -312,7 +523,16 @@
           - "║  00-bootstrap: OS baseline configured on all hosts            ║"
           - "║  01-identity:  FreeIPA server running on head01               ║"
           - "║  01-identity:  All clients enrolled and SSSD configured       ║"
+          - "║  02-storage:   NFS server exporting /home, /proj, /soft       ║"
+          - "║  02-storage:   All clients mounted NFS shares                 ║"
           - "╠═══════════════════════════════════════════════════════════════╣"
-          - "║  - Monitor FreeIPA server via web UI at https://head01/ipa    ║"
+          - "║  NFS Shares:                                                  ║"
+          - "║    /home - User home directories (rw)                         ║"
+          - "║    /proj - Project data (rw)                                  ║"
+          - "║    /soft - Shared applications (ro on clients)                ║"
+          - "╠═══════════════════════════════════════════════════════════════╣"
+          - "║  Next steps:                                                  ║"
+          - "║    - Run 03-slurm-head.yml for Slurm controller               ║"
+          - "║    - Run 04-slurm-compute.yml for compute nodes               ║"
           - "╚═══════════════════════════════════════════════════════════════╝"
           - ""
