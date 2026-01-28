@@ -24,6 +24,9 @@ dns_servers:
   - 8.8.8.8
   - 1.1.1.1
 
+# Cluster network (used for NFS exports, etc.)
+cluster_network_cidr: 192.168.56.0/24
+
 # FreeIPA
 freeipa_domain: lab.local
 freeipa_realm: LAB.LOCAL
@@ -33,6 +36,7 @@ freeipa_server: "head01.{{ domain_name }}"
 # Storage
 nfs_home: /home
 nfs_proj: /proj
+nfs_soft: /soft
 
 # Slurm
 slurm_cluster_name: HPC-LAB

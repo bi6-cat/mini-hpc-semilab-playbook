@@ -4,10 +4,13 @@ slurm_node_type: storage
 nfs_server_enabled: true
 nfs_exports:
   - path: "{{ nfs_home }}"
-    clients: "10.0.0.0/24"
+    clients: "{{ cluster_network_cidr }}"
     options: "rw,sync,no_subtree_check,no_root_squash"
   - path: "{{ nfs_proj }}"
-    clients: "10.0.0.0/24"
+    clients: "{{ cluster_network_cidr }}"
+    options: "rw,sync,no_subtree_check,no_root_squash"
+  - path: "{{ nfs_soft }}"
+    clients: "{{ cluster_network_cidr }}"
     options: "rw,sync,no_subtree_check,no_root_squash"
 
 # Disk quota

@@ -8,11 +8,14 @@ memory_gb: 4
 slurm_cpu_count: "{{ cpu_cores }}"
 slurm_real_memory: "{{ memory_gb * 1024 }}"
 
-# NFS mount points
+# NFS mount points (NFSv3)
 nfs_mounts:
   - path: "{{ nfs_home }}"
     server: storage01
-    opts: "rw,sync,hard,intr"
+    opts: "rw,hard,intr,nfsvers=3,tcp,rsize=1048576,wsize=1048576"
   - path: "{{ nfs_proj }}"
     server: storage01
-    opts: "rw,sync,hard,intr"
+    opts: "rw,hard,intr,nfsvers=3,tcp,rsize=1048576,wsize=1048576"
+  - path: "{{ nfs_soft }}"
+    server: storage01
+    opts: "ro,hard,intr,nfsvers=3,tcp,rsize=1048576,wsize=1048576"

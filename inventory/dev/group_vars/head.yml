@@ -12,7 +12,17 @@ mariadb_root_password: "Admin@1234"
 mariadb_slurm_password: "Admin@1234"
 
 # NFS Server
-nfs_server_enabled: false  # Head node không serve NFS, storage01 làm điều này
+nfs_server_enabled: false
+
+# NFS mount points (NFSv3 - Head is an NFS client)
+# NOTE: /home is NOT mounted on head to avoid conflict with local hpcadmin home
+nfs_mounts:
+  - path: "{{ nfs_proj }}"
+    server: storage01
+    opts: "rw,hard,intr,nfsvers=3,tcp,rsize=1048576,wsize=1048576"
+  - path: "{{ nfs_soft }}"
+    server: storage01
+    opts: "rw,hard,intr,nfsvers=3,tcp,rsize=1048576,wsize=1048576" 
 
 # Monitoring
 prometheus_port: 9090
