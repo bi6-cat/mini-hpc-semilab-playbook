@@ -1,0 +1,106 @@
+---
+
+- name: 02 - Storage (NFS server)
+  hosts: storage
+  gather_facts: true
+  become: true
+
+  pre_tasks:
+    - name: Verify network connectivity
+      ansible.builtin.ping:
+
+    - name: Validate NFS exports config
+      ansible.builtin.assert:
+        that:
+          - nfs_server_enabled | default(false) | bool
+          - nfs_exports is defined
+          - nfs_exports | length > 0
+        fail_msg: "storage group requires nfs_server_enabled=true and nfs_exports list"
+
+  tasks:
+    - name: Install NFS server packages
+      ansible.builtin.dnf:
+        name:
+          - nfs-utils
+          - rpcbind
+          - quota
+        state: present
+
+    - name: Ensure export directories exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop: "{{ nfs_exports }}"
+
+    - name: Configure /etc/exports
+      ansible.builtin.blockinfile:
+        path: /etc/exports
+        create: true
+        marker: "# {mark} ANSIBLE MANAGED - HPC NFS EXPORTS"
+        block: |
+          {% for e in nfs_exports %}
+          {{ e.path }} {{ e.clients }}({{ e.options }})
+          {% endfor %}
+
+    - name: Enable and start rpcbind
+      ansible.builtin.systemd:
+        name: rpcbind
+        enabled: true
+        state: started
+
+    - name: Enable and start NFS server
+      ansible.builtin.systemd:
+        name: nfs-server
+        enabled: true
+        state: started
+
+    - name: Apply NFS export table
+      ansible.builtin.command: exportfs -ra
+      changed_when: false
+
+    - name: Show exports
+      ansible.builtin.command: exportfs -v
+      register: exportfs_out
+      changed_when: false
+
+    - name: Export status
+      ansible.builtin.debug:
+        var: exportfs_out.stdout_lines
+
+
+- name: 02 - Storage (NFS clients)
+  hosts: head,login,compute
+  gather_facts: true
+  become: true
+
+  pre_tasks:
+    - name: Verify network connectivity
+      ansible.builtin.ping:
+
+  tasks:
+    - name: Install NFS client packages
+      ansible.builtin.dnf:
+        name:
+          - nfs-utils
+        state: present
+
+    - name: Ensure mount points exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop: "{{ nfs_mounts | default([]) }}"
+
+    - name: Mount NFS shares and persist
+      ansible.builtin.mount:
+        path: "{{ item.path }}"
+        src: "{{ item.server }}:{{ item.path }}"
+        fstype: nfs
+        opts: "{{ item.opts | default('rw,hard,intr,nfsvers=3,tcp') }}"
+        state: mounted
+      loop: "{{ nfs_mounts | default([]) }}"
