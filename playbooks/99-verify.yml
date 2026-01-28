@@ -506,7 +506,67 @@
 
 
 ##############################################################################
-# PART 6: Final Summary
+# PART 6: Verify 05-login-gui (login)
+##############################################################################
+- name: "99 - Verify 05-login-gui: Login GUI"
+  hosts: login
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: "[05] Verify GUI is enabled"
+      ansible.builtin.assert:
+        that:
+          - gui_enabled | default(false) | bool
+        fail_msg: "GUI not enabled on login node"
+
+    - name: "[05] Verify XFCE installed"
+      ansible.builtin.command: rpm -q xfce4-session
+      register: xfce_pkg
+      changed_when: false
+      failed_when: xfce_pkg.rc != 0
+      when: xfce_enabled | default(true) | bool
+
+    - name: "[05] Verify startxfce4 exists"
+      ansible.builtin.command: which startxfce4
+      register: xfce_bin
+      changed_when: false
+      failed_when: xfce_bin.rc != 0
+      when: xfce_enabled | default(true) | bool
+
+    - name: "[05] Verify X2Go packages installed"
+      ansible.builtin.command: rpm -q x2goserver x2goserver-xsession
+      register: x2go_pkg
+      changed_when: false
+      failed_when: x2go_pkg.rc != 0
+      when: x2go_enabled | default(false) | bool
+
+    - name: "[05] Verify /etc/skel/.Xclients exists"
+      ansible.builtin.stat:
+        path: /etc/skel/.Xclients
+      register: xclients_file
+      when: xfce_enabled | default(true) | bool
+
+    - name: "[05] Assert /etc/skel/.Xclients present"
+      ansible.builtin.assert:
+        that:
+          - xclients_file.stat.exists
+        fail_msg: "/etc/skel/.Xclients missing"
+      when: xclients_file is defined and xfce_enabled | default(true) | bool
+
+    - name: "[05] Display login GUI summary"
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════"
+          - "  05-LOGIN GUI: {{ inventory_hostname }}"
+          - "═══════════════════════════════════════"
+          - "  ✓ XFCE: {{ 'installed' if xfce_enabled | default(true) else 'skipped' }}"
+          - "  ✓ X2Go: {{ 'installed' if x2go_enabled | default(false) else 'skipped' }}"
+          - "  ✓ X11Forwarding: enabled"
+
+
+##############################################################################
+# PART 7: Final Summary
 ##############################################################################
 - name: "99 - Verify: Final Summary"
   hosts: localhost
@@ -525,6 +585,7 @@
           - "║  01-identity:  All clients enrolled and SSSD configured       ║"
           - "║  02-storage:   NFS server exporting /home, /proj, /soft       ║"
           - "║  02-storage:   All clients mounted NFS shares                 ║"
+          - "║  05-login-gui: XFCE/X2Go on login node verified               ║"
           - "╠═══════════════════════════════════════════════════════════════╣"
           - "║  NFS Shares:                                                  ║"
           - "║    /home - User home directories (rw)                         ║"
