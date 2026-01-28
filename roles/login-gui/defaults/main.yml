@@ -1,0 +1,53 @@
+---
+# Feature toggles (inherit from group_vars/login.yml when set there)
+gui_enabled: false
+xfce_enabled: true
+x2go_enabled: true
+
+# Performance tuning
+gui_xfce_tuning_enabled: true
+# Tune a single existing user (e.g. ipaadmin). Leave empty to skip.
+gui_xfce_tune_user: ""
+
+# Repos
+# Rocky 8 uses 'powertools'. If your environment uses a different name, override.
+gui_powertools_repo: powertools
+
+# Package lists
+
+gui_xorg_packages:
+  - xorg-x11-server-Xorg
+  - xorg-x11-xauth
+  - xorg-x11-fonts-Type1
+  - xorg-x11-fonts-misc
+  - xorg-x11-fonts-75dpi
+  - xorg-x11-fonts-100dpi
+  - dejavu-sans-fonts
+  - dejavu-serif-fonts
+  - liberation-fonts
+  - dbus-x11
+
+# Keep this list conservative for Rocky 8
+
+gui_xfce_packages:
+  - xfce4-session
+  - xfce4-panel
+  - xfce4-settings
+  - xfce4-terminal
+  - xfce4-appfinder
+  - xfce4-screenshooter
+  - xfdesktop
+  - xfwm4
+  - thunar
+  - thunar-volman
+  - file-roller
+  - firefox
+  - gedit
+  - evince
+  - network-manager-applet
+
+# X2Go (EPEL)
+gui_x2go_packages:
+  - x2goserver
+  - x2goserver-xsession
+  - x2goserver-common
