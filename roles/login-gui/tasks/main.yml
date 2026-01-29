@@ -74,60 +74,29 @@
     - xfce_enabled | default(true) | bool
     - gui_xfce_tuning_enabled | bool
 
-- name: Lookup tune user 
-  ansible.builtin.getent:
-    database: passwd
-    key: "{{ gui_xfce_tune_user }}"
-  when:
-    - xfce_enabled | default(true) | bool
-    - gui_xfce_tuning_enabled | bool
-    - gui_xfce_tune_user | length > 0
-
-- name: Set facts for tune user
-  ansible.builtin.set_fact:
-    _gui_tune_home: "{{ getent_passwd[gui_xfce_tune_user][4] }}"
-    _gui_tune_uid: "{{ getent_passwd[gui_xfce_tune_user][1] }}"
-    _gui_tune_gid: "{{ getent_passwd[gui_xfce_tune_user][2] }}"
-  when:
-    - xfce_enabled | default(true) | bool
-    - gui_xfce_tuning_enabled | bool
-    - gui_xfce_tune_user | length > 0
-
-- name: Ensure per-user xfconf directory exists
-  ansible.builtin.file:
-    path: "{{ _gui_tune_home }}/.config/xfce4/xfconf/xfce-perchannel-xml"
-    state: directory
-    owner: "{{ _gui_tune_uid }}"
-    group: "{{ _gui_tune_gid }}"
-    mode: '0700'
-  when:
-    - xfce_enabled | default(true) | bool
-    - gui_xfce_tuning_enabled | bool
-    - gui_xfce_tune_user | length > 0
-
-- name: Disable compositor (tune user override)
+- name: Disable XFCE screensaver/lock (global defaults)
   ansible.builtin.template:
-    src: xfwm4.xml.j2
-    dest: "{{ _gui_tune_home }}/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml"
-    owner: "{{ _gui_tune_uid }}"
-    group: "{{ _gui_tune_gid }}"
-    mode: '0600'
+    src: xfce4-screensaver.xml.j2
+    dest: /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml
+    owner: root
+    group: root
+    mode: '0644'
   when:
     - xfce_enabled | default(true) | bool
     - gui_xfce_tuning_enabled | bool
-    - gui_xfce_tune_user | length > 0
+    - gui_xfce_screensaver_tuning_enabled | default(true) | bool
 
-- name: Disable wallpaper (tune user override)
+- name: Configure XFCE power manager (global defaults)
   ansible.builtin.template:
-    src: xfce4-desktop.xml.j2
-    dest: "{{ _gui_tune_home }}/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml"
-    owner: "{{ _gui_tune_uid }}"
-    group: "{{ _gui_tune_gid }}"
-    mode: '0600'
+    src: xfce4-power-manager.xml.j2
+    dest: /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml
+    owner: root
+    group: root
+    mode: '0644'
   when:
     - xfce_enabled | default(true) | bool
     - gui_xfce_tuning_enabled | bool
-    - gui_xfce_tune_user | length > 0
+    - gui_xfce_power_manager_tuning_enabled | default(true) | bool
 
 - name: Install X2Go server packages
   ansible.builtin.dnf:
@@ -145,17 +114,9 @@
   when: x2go_enabled | default(true) | bool
 
 - name: Ensure X2Go Xsession script
-  ansible.builtin.copy:
+  ansible.builtin.template:
+    src: x2go-Xsession.j2
     dest: /etc/x2go/Xsession
-    content: |
-      #!/bin/bash
-      if [ -x ~/.Xclients ]; then
-          exec ~/.Xclients
-      elif [ -x /etc/skel/.Xclients ]; then
-          exec /etc/skel/.Xclients
-      else
-          exec /usr/bin/startxfce4
-      fi
     owner: root
     group: root
     mode: '0755'
@@ -172,6 +133,18 @@
     line: 'X11Forwarding yes'
     state: present
   notify: Restart sshd
+
+- name: Ensure SSH client alive (keepalive) settings
+  ansible.builtin.blockinfile:
+    path: /etc/ssh/sshd_config
+    marker: "# {mark} ANSIBLE MANAGED: x2go keepalive"
+    block: |
+      ClientAliveInterval {{ gui_x2go_ssh_client_alive_interval }}
+      ClientAliveCountMax {{ gui_x2go_ssh_client_alive_countmax }}
+  notify: Restart sshd
+  when:
+    - x2go_enabled | default(true) | bool
+    - gui_x2go_ssh_keepalive_enabled | default(true) | bool
 
 - name: Verify XFCE is installed
   ansible.builtin.command: which startxfce4

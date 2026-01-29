@@ -6,18 +6,34 @@ x2go_enabled: true
 
 # Performance tuning
 gui_xfce_tuning_enabled: true
-# Tune a single existing user (e.g. ipaadmin). Leave empty to skip.
-gui_xfce_tune_user: ""
 
-# Repos
-# Rocky 8 uses 'powertools'. If your environment uses a different name, override.
+# XFCE screensaver/lock tuning (xfce4-screensaver.xml)
+gui_xfce_screensaver_tuning_enabled: true
+gui_xfce_lock_enabled: false
+gui_xfce_screensaver_enabled: false
+gui_xfce_idle_activation_enabled: false
+
+# XFCE power management tuning (xfce4-power-manager.xml)
+gui_xfce_power_manager_tuning_enabled: true
+gui_xfce_pm_dpms_enabled: false
+gui_xfce_pm_blank_on_ac: 0
+gui_xfce_pm_dpms_on_ac_sleep: 0
+gui_xfce_pm_lock_screen_suspend_hibernate: false
+gui_xfce_pm_dpms_on_ac_off: 0
+
+# Keep SSH session alive
+gui_x2go_ssh_keepalive_enabled: true
+gui_x2go_ssh_client_alive_interval: 60
+gui_x2go_ssh_client_alive_countmax: 3
+
+# Repositories
 gui_powertools_repo: powertools
 
 # Package lists
-
 gui_xorg_packages:
   - xorg-x11-server-Xorg
   - xorg-x11-xauth
+  - xorg-x11-server-utils
   - xorg-x11-fonts-Type1
   - xorg-x11-fonts-misc
   - xorg-x11-fonts-75dpi
@@ -27,26 +43,20 @@ gui_xorg_packages:
   - liberation-fonts
   - dbus-x11
 
-# Keep this list conservative for Rocky 8
-
 gui_xfce_packages:
   - xfce4-session
   - xfce4-panel
   - xfce4-settings
   - xfce4-terminal
   - xfce4-appfinder
-  - xfce4-screenshooter
   - xfdesktop
   - xfwm4
   - thunar
-  - thunar-volman
   - file-roller
   - firefox
-  - gedit
+  - mousepad
   - evince
-  - network-manager-applet
 
-# X2Go (EPEL)
 gui_x2go_packages:
   - x2goserver
   - x2goserver-xsession
