@@ -1,0 +1,11 @@
+# Managed by Ansible (role: login-limits)
+# Format: <group> <cpuquota> <memmax>
+# Notes:
+# - CPUQuota: 100% ~= 1 full CPU core
+# - MemoryMax: hard limit; OOM-kills processes within the slice when exceeded
+
+{% for g in user_groups | default([]) %}
+{% if g.login_cpu is defined and g.login_mem_gb is defined %}
+{{ '%-8s' | format(g.name) }} {{ ((g.login_cpu | int) * 100) }}% {{ (g.login_mem_gb | int) }}G
+{% endif %}
+{% endfor %}

@@ -1,0 +1,39 @@
+#!/bin/bash
+set -euo pipefail
+
+user="${PAM_USER:-}"
+[ -z "$user" ] && exit 0
+
+uid="$(id -u "$user" 2>/dev/null || true)"
+[ -z "$uid" ] && exit 0
+
+cfg="{{ login_limits_conf_path }}"
+[ -r "$cfg" ] || exit 0
+
+groups="$(id -nG "$user" 2>/dev/null || true)"
+
+cpu=""
+mem=""
+while read -r g c m; do
+  [[ "$g" =~ ^#|^$ ]] && continue
+  if echo " $groups " | grep -qw "$g"; then
+    cpu="$c"
+    mem="$m"
+    break
+  fi
+done < "$cfg"
+
+[ -z "$cpu" ] && exit 0
+
+slice="user-${uid}.slice"
+dropin_dir="/etc/systemd/system/${slice}.d"
+mkdir -p "$dropin_dir"
+
+cat > "${dropin_dir}/50-hpc-login-limits.conf" <<EOF
+[Slice]
+CPUQuota=${cpu}
+MemoryMax=${mem}
+EOF
+
+systemctl daemon-reload >/dev/null 2>&1 || true
+systemctl set-property --runtime "$slice" "CPUQuota=${cpu}" "MemoryMax=${mem}" >/dev/null 2>&1 || true
