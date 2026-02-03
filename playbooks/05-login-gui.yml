@@ -16,6 +16,7 @@
         fail_msg: "GUI not enabled for this host (set gui_enabled: true)"
 
   roles:
+    - login-limits
     - login-gui
 
 - name: Configure User Groups on FreeIPA

@@ -53,16 +53,22 @@ user_groups:
     description: "Lecturers/Teachers Group"
     sudo_access: true
     login_nodes: ['login']
+    login_cpu: 8
+    login_mem_gb: 16
     compute_access: true
   - name: stu
     gid: 10002
     description: "Students Group"
     sudo_access: false
     login_nodes: ['login']
+    login_cpu: 4
+    login_mem_gb: 8
     compute_access: true
   - name: guest
     gid: 10003
     description: "Guest Users Group"
     sudo_access: false
     login_nodes: ['login']
+    login_cpu: 2
+    login_mem_gb: 4
     compute_access: false
