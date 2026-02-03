@@ -13,8 +13,23 @@ nfs_exports:
     clients: "{{ cluster_network_cidr }}"
     options: "rw,sync,no_subtree_check,no_root_squash"
 
-# Disk quota
+# Disk quota - Group quota (shared pool)
 quota_enabled: true
+
+# Group quota: tất cả user trong group dùng chung quota pool
+quota_group_limits:
+  - groupname: stu
+    soft_gb: 280
+    hard_gb: 300
+  - groupname: lecture
+    soft_gb: 180
+    hard_gb: 200
+  - groupname: guest
+    soft_gb: 18
+    hard_gb: 20
+
+# Optional: per-user override (nếu cần)
+quota_user_limits: []
 
 # FreeIPA Client
 freeipa_setup: client

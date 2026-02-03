@@ -26,6 +26,13 @@
           - quota
         state: present
 
+    - name: Configure filesystem quotas (NFS server)
+      ansible.builtin.include_role:
+        name: quota
+      vars:
+        quota_path: "{{ nfs_home }}"
+      when: quota_enabled | default(false) | bool
+
     - name: Ensure export directories exist
       ansible.builtin.file:
         path: "{{ item.path }}"
