@@ -45,3 +45,24 @@ slurm_log_dir: /var/log/slurm
 
 # SSH
 ssh_port: 22
+
+# User Groups Configuration
+user_groups:
+  - name: lecture
+    gid: 10001
+    description: "Lecturers/Teachers Group"
+    sudo_access: true
+    login_nodes: ['login']
+    compute_access: true
+  - name: stu
+    gid: 10002
+    description: "Students Group"
+    sudo_access: false
+    login_nodes: ['login']
+    compute_access: true
+  - name: guest
+    gid: 10003
+    description: "Guest Users Group"
+    sudo_access: false
+    login_nodes: ['login']
+    compute_access: false

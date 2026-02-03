@@ -17,3 +17,54 @@
 
   roles:
     - login-gui
+
+- name: Configure User Groups on FreeIPA
+  hosts: head
+  become: true
+  gather_facts: true
+  
+  tasks:
+    - name: Include identity role for user group setup
+      ansible.builtin.include_role:
+        name: identity
+      tags:
+        - identity
+        - user-groups
+
+- name: Verify User Groups Configuration
+  hosts: head
+  become: true
+  gather_facts: false
+  
+  tasks:
+    - name: Get Kerberos ticket
+      ansible.builtin.shell: echo "{{ freeipa_admin_password }}" | kinit admin
+      changed_when: false
+      no_log: true
+
+    - name: List all groups
+      ansible.builtin.command: ipa group-find --sizelimit=0
+      register: all_groups
+      changed_when: false
+
+    - name: Display groups
+      ansible.builtin.debug:
+        msg: "{{ all_groups.stdout_lines }}"
+
+    - name: List all HBAC rules
+      ansible.builtin.command: ipa hbacrule-find --sizelimit=0
+      register: all_hbac_rules
+      changed_when: false
+
+    - name: Display HBAC rules
+      ansible.builtin.debug:
+        msg: "{{ all_hbac_rules.stdout_lines }}"
+
+    - name: List all users
+      ansible.builtin.command: ipa user-find --sizelimit=0
+      register: all_users
+      changed_when: false
+
+    - name: Display users
+      ansible.builtin.debug:
+        msg: "{{ all_users.stdout_lines }}"

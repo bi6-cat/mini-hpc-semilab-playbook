@@ -103,9 +103,129 @@
   when: "'Enabled: True' not in sudo_rule_info.stdout"  
   changed_when: true
 
+# Create user groups (lecture, stu, guest)
+- name: Check if user groups exist
+  ansible.builtin.command: ipa group-show {{ item.name }}
+  loop: "{{ user_groups }}"
+  register: user_groups_check
+  changed_when: false
+  failed_when: false
+  when: user_groups is defined
+
+- name: Create user groups
+  ansible.builtin.command: >
+    ipa group-add {{ item.item.name }}
+    --desc='{{ item.item.description }}'
+    --gid={{ item.item.gid }}
+  loop: "{{ user_groups_check.results }}"
+  when: 
+    - user_groups is defined
+    - item.rc != 0
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# Create HBAC rules for groups
+- name: Check if HBAC rules exist for user groups
+  ansible.builtin.command: ipa hbacrule-show hbac-{{ item.name }}
+  loop: "{{ user_groups }}"
+  register: hbac_rules_check
+  changed_when: false
+  failed_when: false
+  when: user_groups is defined
+
+- name: Create HBAC rules for user groups
+  ansible.builtin.command: >
+    ipa hbacrule-add hbac-{{ item.item.name }}
+    --desc='Access rule for {{ item.item.description }}'
+  loop: "{{ hbac_rules_check.results }}"
+  when:
+    - user_groups is defined
+    - item.rc != 0
+  loop_control:
+    label: "{{ item.item.name }}"
+
+- name: Add user groups to HBAC rules
+  ansible.builtin.command: >
+    ipa hbacrule-add-user hbac-{{ item.name }}
+    --groups={{ item.name }}
+  loop: "{{ user_groups }}"
+  register: hbac_add_group
+  failed_when:
+    - hbac_add_group.rc != 0
+    - "'already a member' not in hbac_add_group.stdout"
+  changed_when: "'Number of members added 1' in hbac_add_group.stdout"
+  when: user_groups is defined
+
+- name: Configure HBAC rules - Add hosts based on group access
+  ansible.builtin.shell: |
+    {% for node_type in item.login_nodes %}
+    ipa hbacrule-add-host hbac-{{ item.name }} --hostgroups={{ node_type }} 2>/dev/null || true
+    {% endfor %}
+  loop: "{{ user_groups }}"
+  register: hbac_add_hosts
+  changed_when: false
+  when: user_groups is defined
+
+# Create sudo rule for lecturers
+- name: Check if sudo rule for lecturers exists
+  ansible.builtin.command: ipa sudorule-show lecture-sudo
+  register: lecture_sudorule_check
+  changed_when: false
+  failed_when: false
+  when: user_groups is defined
+
+- name: Create sudo rule for lecturers
+  ansible.builtin.command: >
+    ipa sudorule-add lecture-sudo
+    --desc='Allow lecturers sudo access'
+  when:
+    - user_groups is defined
+    - lecture_sudorule_check.rc != 0
+
+- name: Configure sudo rule for lecturers - add group
+  ansible.builtin.command: ipa sudorule-add-user lecture-sudo --groups=lecture
+  register: lecture_sudo_user
+  failed_when:
+    - lecture_sudo_user.rc != 0
+    - "'already a member' not in lecture_sudo_user.stdout"
+  changed_when: "'Number of members added 1' in lecture_sudo_user.stdout"
+  when:
+    - user_groups is defined
+    - lecture_sudorule_check.rc == 0 or lecture_sudorule_check.rc != 0
+
+- name: Configure sudo rule for lecturers - add commands
+  ansible.builtin.command: ipa sudorule-mod lecture-sudo --cmdcat=all
+  register: lecture_sudo_cmd
+  changed_when: "'Modified' in lecture_sudo_cmd.stdout"
+  failed_when: false
+  when: user_groups is defined
+
+- name: Configure sudo rule for lecturers - add hosts
+  ansible.builtin.command: ipa sudorule-mod lecture-sudo --hostcat=all
+  register: lecture_sudo_host
+  changed_when: "'Modified' in lecture_sudo_host.stdout"
+  failed_when: false
+  when: user_groups is defined
+
+- name: Check sudo rule status
+  ansible.builtin.command: ipa sudorule-show lecture-sudo
+  register: rule_check
+  changed_when: false
+  failed_when: false
+  when: user_groups is defined
+
+- name: Enable sudo rule for lecturers
+  ansible.builtin.command: ipa sudorule-enable lecture-sudo
+  when: 
+    - user_groups is defined
+    - rule_check.rc == 0
+    - "'Enabled: FALSE' in rule_check.stdout"
+
 - name: Display created resources
   ansible.builtin.debug:
     msg:
       - "✓ Group: {{ admin_group }}"
       - "✓ User: {{ admin_user }}"
       - "✓ Sudo rule: {{ sudo_rule_name | default('hpc-admins') }}"
+      - "✓ User groups: {{ user_groups | map(attribute='name') | list | join(', ') if user_groups is defined else 'none' }}"
+      - "✓ Sample users: {{ sample_users | map(attribute='username') | list | join(', ') if sample_users is defined else 'none' }}"
