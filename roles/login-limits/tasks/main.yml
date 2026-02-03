@@ -1,0 +1,49 @@
+---
+- name: Assert user_groups is defined (login limits)
+  ansible.builtin.assert:
+    that:
+      - user_groups is defined
+      - user_groups | length > 0
+    fail_msg: "user_groups is not defined; configure it in inventory group_vars"
+  when: login_limits_enabled | bool
+
+- name: Ensure /etc/hpc exists
+  ansible.builtin.file:
+    path: /etc/hpc
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: login_limits_enabled | bool
+
+- name: Render login limits configuration
+  ansible.builtin.template:
+    src: login-limits.conf.j2
+    dest: "{{ login_limits_conf_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+  when: login_limits_enabled | bool
+
+- name: Install login limits apply script
+  ansible.builtin.template:
+    src: hpc-apply-login-limits.sh.j2
+    dest: "{{ login_limits_script_path }}"
+    owner: root
+    group: root
+    mode: '0755'
+  when: login_limits_enabled | bool
+
+- name: Ensure PAM runs login limits script for sshd sessions
+  ansible.builtin.lineinfile:
+    path: "{{ login_limits_pam_sshd_path }}"
+    line: "session optional pam_exec.so seteuid {{ login_limits_script_path }}"
+    insertafter: '^session\s+.*pam_systemd\.so'
+    state: present
+    create: false
+  when: login_limits_enabled | bool
+
+- name: Reload systemd to pick up drop-ins
+  ansible.builtin.command: systemctl daemon-reload
+  changed_when: false
+  when: login_limits_enabled | bool

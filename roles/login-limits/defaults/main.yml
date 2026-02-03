@@ -1,0 +1,10 @@
+---
+# Enable/disable login resource limits (systemd cgroups via PAM)
+login_limits_enabled: true
+
+# Paths
+login_limits_conf_path: /etc/hpc/login-limits.conf
+login_limits_script_path: /usr/local/sbin/hpc-apply-login-limits.sh
+
+# PAM integration
+login_limits_pam_sshd_path: /etc/pam.d/sshd
