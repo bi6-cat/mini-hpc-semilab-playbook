@@ -1,0 +1,21 @@
+---
+quota_enabled: false
+
+# Quota target on storage (filesystem that backs NFS /home)
+quota_path: /home
+
+# Persist quota mount option into /etc/fstab
+quota_persist_fstab: true
+
+# For ext2/3/4 only (safe to keep true; failures ignored)
+quota_initialize_ext_filesystems: true
+
+# Group quota limits (shared pool for entire group)
+# Users must have this as their primary group for quota to apply
+quota_group_limits: []
+  # - groupname: stu
+  #   soft_gb: 90
+  #   hard_gb: 100
+
+# Optional: per-user quota overrides
+quota_user_limits: []
