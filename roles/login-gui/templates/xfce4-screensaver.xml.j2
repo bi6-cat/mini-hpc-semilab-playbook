@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-screensaver" version="1.0">
   <property name="lock" type="empty">
-    <property name="enabled" type="bool" value="{{ gui_xfce_lock_enabled | default(false) | bool | ternary('true','false') }}"/>
+    <property name="enabled" type="bool" value="false"/>
   </property>
   <property name="saver" type="empty">
-    <property name="enabled" type="bool" value="{{ gui_xfce_screensaver_enabled | default(false) | bool | ternary('true','false') }}"/>
+    <property name="enabled" type="bool" value="false"/>
   </property>
   <property name="idle-activation" type="empty">
-    <property name="enabled" type="bool" value="{{ gui_xfce_idle_activation_enabled | default(false) | bool | ternary('true','false') }}"/>
+    <property name="enabled" type="bool" value="false"/>
   </property>
 </channel>
