@@ -30,7 +30,7 @@ Hệ thống HPC được cấu hình với 3 nhóm người dùng chính:
 
 ## Cấu Hình
 
-### File cấu hình: `inventory/dev/group_vars/login.yml`
+### File cấu hình: `inventory/dev/group_vars/all.yml`
 
 ```yaml
 user_groups:
@@ -39,20 +39,39 @@ user_groups:
     description: "Lecturers/Teachers Group"
     sudo_access: true
     login_nodes: ['login']
+    login_cpu: 8
+    login_mem_gb: 16
     compute_access: true
   - name: stu
     gid: 10002
     description: "Students Group"
     sudo_access: false
     login_nodes: ['login']
+    login_cpu: 4
+    login_mem_gb: 8
     compute_access: true
   - name: guest
     gid: 10003
     description: "Guest Users Group"
     sudo_access: false
     login_nodes: ['login']
+    login_cpu: 2
+    login_mem_gb: 4
     compute_access: false
 ```
+
+## Giới hạn tài nguyên trên Login Node (chống lag)
+
+Login node giới hạn tài nguyên theo nhóm bằng systemd cgroups (user slice) và PAM:
+
+- Policy nằm trong `user_groups` (các trường `login_cpu`, `login_mem_gb`).
+- Role `login-limits` render file `/etc/hpc/login-limits.conf` và cài script `/usr/local/sbin/hpc-apply-login-limits.sh`.
+- PAM `sshd` chạy script khi user đăng nhập; script sẽ set `CPUQuota` + `MemoryMax` cho `user-UID.slice`.
+
+Ý nghĩa:
+
+- `login_cpu: 4` tương đương `CPUQuota=400%` (xấp xỉ 4 vCPU).
+- `login_mem_gb: 8` tương đương `MemoryMax=8G` (vượt sẽ bị OOM-kill trong slice của user).
 
 ## Triển Khai
 
@@ -67,7 +86,21 @@ ansible-playbook -i inventory/dev/hosts.yml playbooks/05-login-gui.yml
 
 **Cách 1: Thêm vào file cấu hình** (khuyên dùng)
 
-Sửa file `inventory/dev/group_vars/login.yml`, thêm vào phần `sample_users`:
+Sửa file `inventory/dev/group_vars/all.yml` (phần `user_groups`), hoặc thêm user trực tiếp bằng FreeIPA CLI.
+
+## Kiểm tra giới hạn (trên login01)
+
+Đăng nhập bằng user thuộc group (vd `student01`), rồi chạy:
+
+```bash
+systemctl show user-$(id -u).slice -p CPUQuota -p MemoryMax
+```
+
+Kết quả kỳ vọng:
+
+- lecture: `CPUQuota=1200%`, `MemoryMax=24G`
+- stu: `CPUQuota=400%`, `MemoryMax=8G`
+- guest: `CPUQuota=100%`, `MemoryMax=2G`
 
 ```yaml
 sample_users:
@@ -252,7 +285,7 @@ systemctl restart sssd
 
 ## Bảo Mật
 
-### Đổi mật khẩu mặc định:
+### File cấu hình: `inventory/dev/group_vars/all.yml`
 
 **Người dùng tự đổi:**
 ```bash
@@ -273,6 +306,31 @@ ipa pwpolicy-add lecture --minlength=12 --minlife=1 --maxlife=90
 
 # Xem policy hiện tại
 ipa pwpolicy-show
+
+## Giới hạn tài nguyên trên Login node (chống lag)
+
+Login node có thể giới hạn CPU/RAM theo nhóm bằng systemd cgroups.
+
+### Policy mặc định
+
+- lecture: tối đa 12 vCPU, 24GB RAM
+- stu: tối đa 4 vCPU, 8GB RAM
+- guest: tối đa 1 vCPU, 2GB RAM
+
+### Cấu hình
+
+Sửa trong `user_groups` ở `inventory/dev/group_vars/all.yml`:
+
+```yaml
+  - name: stu
+    login_cpu: 4
+    login_mem_gb: 8
+```
+
+### Áp dụng
+
+Role `login-limits` sẽ tạo file cấu hình và gắn PAM hook vào sshd.
+Sau khi chạy playbook, user cần đăng xuất/đăng nhập lại để limit có hiệu lực.
 ```
 
 ## Tài Liệu Tham Khảo
