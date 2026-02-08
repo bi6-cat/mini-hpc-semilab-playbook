@@ -132,15 +132,37 @@
   register: quota_fstab_line
   changed_when: false
 
+- name: Parse current /etc/fstab options for mount target
+  ansible.builtin.set_fact:
+    quota_fstab_opts: >-
+      {{ (((quota_fstab_line.stdout_lines | default([]) | first | default('')).split())[3]
+          if (((quota_fstab_line.stdout_lines | default([]) | first | default('')).split()) | length > 3)
+          else '') }}
+  when:
+    - quota_fstab_line.stdout | length > 0
+
+- name: Compute missing quota options for /etc/fstab
+  ansible.builtin.set_fact:
+    quota_fstab_append_opts: >-
+      {{ (
+          (['uquota'] if (quota_fstype == 'xfs' and 'uquota' not in quota_fstab_opts) else [])
+          + (['gquota'] if (quota_fstype == 'xfs' and 'gquota' not in quota_fstab_opts) else [])
+          + (['usrquota'] if (quota_fstype in ['ext2','ext3','ext4'] and 'usrquota' not in quota_fstab_opts) else [])
+          + (['grpquota'] if (quota_fstype in ['ext2','ext3','ext4'] and 'grpquota' not in quota_fstab_opts) else [])
+        ) | join(',') }}
+  when:
+    - quota_fstab_line.stdout | length > 0
+
 - name: Persist quota options in /etc/fstab
   ansible.builtin.replace:
     path: /etc/fstab
     regexp: "^([^#\\n]*\\s{{ quota_mount_target }}\\s+[^\\s]+\\s+)([^\\s]+)(\\s+.*)$"
-    replace: "\\1\\2,{{ quota_required_opts }}\\3"
+    replace: "\\1\\2,{{ quota_fstab_append_opts }}\\3"
   when:
     - quota_persist_fstab | default(true) | bool
     - quota_fstab_line.stdout | length > 0
     - quota_needs_remount | bool
+    - quota_fstab_append_opts | default('') | length > 0
 
 - name: Initialize ext filesystem quota database (ext2/3/4)
   ansible.builtin.command: "quotacheck -cugm {{ quota_mount_target }}"
