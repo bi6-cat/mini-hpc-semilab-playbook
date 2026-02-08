@@ -6,20 +6,8 @@ x2go_enabled: true
 
 # Performance tuning
 gui_xfce_tuning_enabled: true
-
-# XFCE screensaver/lock tuning (xfce4-screensaver.xml)
 gui_xfce_screensaver_tuning_enabled: true
-gui_xfce_lock_enabled: false
-gui_xfce_screensaver_enabled: false
-gui_xfce_idle_activation_enabled: false
-
-# XFCE power management tuning (xfce4-power-manager.xml)
 gui_xfce_power_manager_tuning_enabled: true
-gui_xfce_pm_dpms_enabled: false
-gui_xfce_pm_blank_on_ac: 0
-gui_xfce_pm_dpms_on_ac_sleep: 0
-gui_xfce_pm_lock_screen_suspend_hibernate: false
-gui_xfce_pm_dpms_on_ac_off: 0
 
 # Keep SSH session alive
 gui_x2go_ssh_keepalive_enabled: true

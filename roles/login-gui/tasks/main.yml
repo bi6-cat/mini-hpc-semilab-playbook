@@ -52,6 +52,17 @@
     - xfce_enabled | default(true) | bool
     - gui_xfce_tuning_enabled | bool
 
+- name: Ensure skel xfconf directory exists for new users
+  ansible.builtin.file:
+    path: /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - xfce_enabled | default(true) | bool
+    - gui_xfce_tuning_enabled | bool
+
 - name: Disable XFWM compositor (global defaults)
   ansible.builtin.template:
     src: xfwm4.xml.j2
@@ -63,10 +74,32 @@
     - xfce_enabled | default(true) | bool
     - gui_xfce_tuning_enabled | bool
 
+- name: Disable XFWM compositor (skel for new users)
+  ansible.builtin.template:
+    src: xfwm4.xml.j2
+    dest: /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - xfce_enabled | default(true) | bool
+    - gui_xfce_tuning_enabled | bool
+
 - name: Simplify desktop backdrop (global defaults)
   ansible.builtin.template:
     src: xfce4-desktop.xml.j2
     dest: /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - xfce_enabled | default(true) | bool
+    - gui_xfce_tuning_enabled | bool
+
+- name: Simplify desktop backdrop (skel for new users)
+  ansible.builtin.template:
+    src: xfce4-desktop.xml.j2
+    dest: /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
     owner: root
     group: root
     mode: '0644'
@@ -86,10 +119,34 @@
     - gui_xfce_tuning_enabled | bool
     - gui_xfce_screensaver_tuning_enabled | default(true) | bool
 
+- name: Disable XFCE screensaver/lock (skel for new users)
+  ansible.builtin.template:
+    src: xfce4-screensaver.xml.j2
+    dest: /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - xfce_enabled | default(true) | bool
+    - gui_xfce_tuning_enabled | bool
+    - gui_xfce_screensaver_tuning_enabled | default(true) | bool
+
 - name: Configure XFCE power manager (global defaults)
   ansible.builtin.template:
     src: xfce4-power-manager.xml.j2
     dest: /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - xfce_enabled | default(true) | bool
+    - gui_xfce_tuning_enabled | bool
+    - gui_xfce_power_manager_tuning_enabled | default(true) | bool
+
+- name: Configure XFCE power manager (skel for new users)
+  ansible.builtin.template:
+    src: xfce4-power-manager.xml.j2
+    dest: /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml
     owner: root
     group: root
     mode: '0644'
