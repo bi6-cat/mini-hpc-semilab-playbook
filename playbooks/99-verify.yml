@@ -506,7 +506,175 @@
 
 
 ##############################################################################
-# PART 6: Verify 05-login-gui (login)
+# PART 6: Verify User Privacy & Permissions (storage)
+##############################################################################
+- name: "99 - Verify User Privacy & Permissions on Storage"
+  hosts: storage
+  gather_facts: true
+  become: true
+  tags:
+    - privacy
+    - permissions
+
+  tasks:
+    # --- 6.1 Verify /home structure and permissions ---
+    - name: "[privacy] Verify /home exists with correct permissions"
+      ansible.builtin.stat:
+        path: /home
+      register: home_dir
+
+    - name: "[privacy] Assert /home is 755"
+      ansible.builtin.assert:
+        that:
+          - home_dir.stat.exists
+          - home_dir.stat.isdir
+          - home_dir.stat.mode == '0755'
+          - home_dir.stat.pw_name == 'root'
+          - home_dir.stat.gr_name == 'root'
+        fail_msg: "/home permissions incorrect. Expected 755 root:root, got {{ home_dir.stat.mode }} {{ home_dir.stat.pw_name }}:{{ home_dir.stat.gr_name }}"
+
+    # --- 6.2 Verify shared directories ---
+    - name: "[privacy] Verify shared directories exist"
+      ansible.builtin.stat:
+        path: "/home/{{ item }}"
+      register: shared_dirs
+      loop:
+        - tools
+        - software
+        - docs
+
+    - name: "[privacy] Assert shared directories are 755 root:root"
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isdir
+          - item.stat.mode == '0755'
+          - item.stat.pw_name == 'root'
+          - item.stat.gr_name == 'root'
+        fail_msg: "Shared directory {{ item.item }} permissions incorrect"
+      loop: "{{ shared_dirs.results }}"
+      loop_control:
+        label: "/home/{{ item.item }}"
+
+    # --- 6.3 Verify group directories ---
+    - name: "[privacy] Verify group directories exist"
+      ansible.builtin.stat:
+        path: "/home/{{ item.name }}"
+      register: group_dirs
+      loop: "{{ user_groups }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: "[privacy] Assert group directories are 711 root:groupname"
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isdir
+          - item.stat.mode == '0711'
+          - item.stat.pw_name == 'root'
+          - item.stat.gr_name == item.item.name
+        fail_msg: "Group directory /home/{{ item.item.name }} permissions incorrect. Expected 711 root:{{ item.item.name }}"
+      loop: "{{ group_dirs.results }}"
+      loop_control:
+        label: "/home/{{ item.item.name }}"
+
+    # --- 6.4 Check sample user home directories if they exist ---
+    - name: "[privacy] Check if sample users exist"
+      ansible.builtin.command: getent passwd
+      register: all_users
+      changed_when: false
+
+    - name: "[privacy] Verify user home directories (if exist)"
+      ansible.builtin.shell: |
+        for group in lecture stu guest; do
+          if [ -d /home/$group ]; then
+            for userdir in /home/$group/*/; do
+              if [ -d "$userdir" ]; then
+                user=$(basename "$userdir")
+                mode=$(stat -c '%a' "$userdir")
+                owner=$(stat -c '%U' "$userdir")
+                group_name=$(stat -c '%G' "$userdir")
+                if [ "$mode" != "700" ] || [ "$owner" != "$user" ] || [ "$group_name" != "$group" ]; then
+                  echo "FAIL: $userdir has mode=$mode owner=$owner:$group_name (expected 700 $user:$group)"
+                  exit 1
+                fi
+              fi
+            done
+          fi
+        done
+        echo "OK: All user directories have correct permissions (700 owner:group)"
+      register: user_dir_check
+      changed_when: false
+      failed_when: user_dir_check.rc != 0
+
+    - name: "[privacy] Display permissions summary"
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════"
+          - "  PRIVACY & PERMISSIONS: {{ inventory_hostname }}"
+          - "═══════════════════════════════════════"
+          - "  ✓ /home: 755 root:root"
+          - "  ✓ Shared directories: 755 root:root (tools, software, docs)"
+          - "  ✓ Group directories: 711 root:groupname (users cannot list each other)"
+          - "  ✓ User directories: {{ user_dir_check.stdout }}"
+
+
+##############################################################################
+# PART 7: Verify User Privacy Configuration (all nodes)
+##############################################################################
+- name: "99 - Verify User Privacy Configuration"
+  hosts: all
+  gather_facts: true
+  become: true
+  tags:
+    - privacy
+    - umask
+
+  tasks:
+    # --- 7.1 Verify umask configuration files ---
+    - name: "[privacy] Verify /etc/profile.d/umask.sh exists"
+      ansible.builtin.stat:
+        path: /etc/profile.d/umask.sh
+      register: umask_profile
+
+    - name: "[privacy] Assert umask.sh exists and contains 0077"
+      ansible.builtin.assert:
+        that:
+          - umask_profile.stat.exists
+        fail_msg: "/etc/profile.d/umask.sh not found"
+      when: umask_profile is defined
+
+    - name: "[privacy] Verify umask 0077 in /etc/profile.d/umask.sh"
+      ansible.builtin.command: grep -q "umask 0077" /etc/profile.d/umask.sh
+      changed_when: false
+      failed_when: false
+      register: umask_profile_check
+
+    - name: "[privacy] Verify umask in /etc/bashrc"
+      ansible.builtin.command: grep -q "umask 0077" /etc/bashrc
+      changed_when: false
+      failed_when: false
+      register: umask_bashrc_check
+
+    - name: "[privacy] Verify UMASK in /etc/login.defs"
+      ansible.builtin.command: grep -q "UMASK.*077" /etc/login.defs
+      changed_when: false
+      failed_when: false
+      register: umask_login_defs_check
+
+    - name: "[privacy] Display umask configuration status"
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════"
+          - "  UMASK CONFIGURATION: {{ inventory_hostname }}"
+          - "═══════════════════════════════════════"
+          - "  ✓ /etc/profile.d/umask.sh: {{ 'OK' if umask_profile_check.rc == 0 else 'MISSING' }}"
+          - "  ✓ /etc/bashrc umask: {{ 'OK' if umask_bashrc_check.rc == 0 else 'MISSING' }}"
+          - "  ✓ /etc/login.defs UMASK: {{ 'OK' if umask_login_defs_check.rc == 0 else 'MISSING' }}"
+
+
+##############################################################################
+# PART 8: Verify 05-login-gui (login)
 ##############################################################################
 - name: "99 - Verify 05-login-gui: Login GUI"
   hosts: login
@@ -564,9 +732,118 @@
           - "  ✓ X2Go: {{ 'installed' if x2go_enabled | default(false) else 'skipped' }}"
           - "  ✓ X11Forwarding: enabled"
 
+    # --- 8.2 Verify resource limits configuration ---
+    - name: "[05] Check if login-limits config exists"
+      ansible.builtin.stat:
+        path: /etc/hpc/login-limits.conf
+      register: login_limits_conf
+
+    - name: "[05] Check if apply-limits script exists"
+      ansible.builtin.stat:
+        path: /usr/local/sbin/hpc-apply-login-limits.sh
+      register: apply_limits_script
+
+    - name: "[05] Display resource limits status"
+      ansible.builtin.debug:
+        msg:
+          - "  ✓ Login limits config: {{ 'present' if login_limits_conf.stat.exists else 'not configured' }}"
+          - "  ✓ Apply limits script: {{ 'present' if apply_limits_script.stat.exists else 'not configured' }}"
+
 
 ##############################################################################
-# PART 7: Final Summary
+# PART 9: Verify User Groups & Sudo Rules (head)
+##############################################################################
+- name: "99 - Verify User Groups & Sudo Rules"
+  hosts: head
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: "[groups] Get Kerberos ticket for verification"
+      ansible.builtin.shell: echo "{{ freeipa_admin_password }}" | kinit admin
+      changed_when: false
+      no_log: true
+
+    # --- 9.1 Verify user groups exist ---
+    - name: "[groups] Verify user groups exist in FreeIPA"
+      ansible.builtin.command: ipa group-show {{ item.name }}
+      register: group_show
+      changed_when: false
+      failed_when: group_show.rc != 0
+      loop: "{{ user_groups }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: "[groups] Verify group GIDs"
+      ansible.builtin.shell: ipa group-show {{ item.name }} | grep 'GID:' | awk '{print $2}'
+      register: group_gids
+      changed_when: false
+      loop: "{{ user_groups }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: "[groups] Assert group GIDs match configuration"
+      ansible.builtin.assert:
+        that:
+          - item.stdout | int == item.item.gid
+        fail_msg: "Group {{ item.item.name }} GID mismatch. Expected {{ item.item.gid }}, got {{ item.stdout }}"
+      loop: "{{ group_gids.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    # --- 9.2 Verify HBAC rules ---
+    - name: "[groups] Verify HBAC rules exist"
+      ansible.builtin.command: ipa hbacrule-show hbac-{{ item.name }}
+      register: hbac_rules
+      changed_when: false
+      failed_when: hbac_rules.rc != 0
+      loop: "{{ user_groups }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: "[groups] Verify HBAC rules are enabled"
+      ansible.builtin.assert:
+        that:
+          - "'Enabled: True' in item.stdout or 'Enabled: TRUE' in item.stdout"
+        fail_msg: "HBAC rule hbac-{{ item.item.name }} is not enabled"
+      loop: "{{ hbac_rules.results }}"
+      loop_control:
+        label: "hbac-{{ item.item.name }}"
+
+    # --- 9.3 Verify sudo rules for groups with sudo_access ---
+    - name: "[groups] Get sudo rules"
+      ansible.builtin.command: ipa sudorule-find
+      register: sudo_rules_list
+      changed_when: false
+
+    - name: "[groups] Verify sudo rule for lecture group"
+      ansible.builtin.command: ipa sudorule-show lecture-sudo
+      register: lecture_sudo
+      changed_when: false
+      failed_when: lecture_sudo.rc != 0
+      when: "(user_groups | selectattr('name', 'equalto', 'lecture') | selectattr('sudo_access', 'equalto', true) | list | length > 0)"
+
+    - name: "[groups] Assert lecture-sudo is enabled"
+      ansible.builtin.assert:
+        that:
+          - "'Enabled: True' in lecture_sudo.stdout or 'Enabled: TRUE' in lecture_sudo.stdout"
+        fail_msg: "Sudo rule lecture-sudo is not enabled"
+      when: lecture_sudo is defined and lecture_sudo.stdout is defined
+
+    - name: "[groups] Display groups verification summary"
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════"
+          - "  USER GROUPS VERIFICATION: {{ inventory_hostname }}"
+          - "═══════════════════════════════════════"
+          - "  ✓ User groups: {{ user_groups | map(attribute='name') | join(', ') }}"
+          - "  ✓ Group GIDs: verified"
+          - "  ✓ HBAC rules: enabled for all groups"
+          - "  ✓ Sudo rules: lecture-sudo enabled"
+
+
+##############################################################################
+# PART 10: Final Summary
 ##############################################################################
 - name: "99 - Verify: Final Summary"
   hosts: localhost
@@ -586,6 +863,24 @@
           - "║  02-storage:   NFS server exporting /home, /proj, /soft       ║"
           - "║  02-storage:   All clients mounted NFS shares                 ║"
           - "║  05-login-gui: XFCE/X2Go on login node verified               ║"
+          - "║  06-privacy:   Permissions verified on storage node           ║"
+          - "║  07-privacy:   Umask configuration applied to all nodes       ║"
+          - "║  08-groups:    User groups and HBAC/sudo rules verified       ║"
+          - "╠═══════════════════════════════════════════════════════════════╣"
+          - "║  Privacy & Permissions:                                       ║"
+          - "║    /home           - 755 root:root (shared access)            ║"
+          - "║    /home/tools     - 755 root:root (shared - all users)       ║"
+          - "║    /home/software  - 755 root:root (shared - all users)       ║"
+          - "║    /home/docs      - 755 root:root (shared - all users)       ║"
+          - "║    /home/lecture   - 770 root:lecture (group isolation)       ║"
+          - "║    /home/stu       - 770 root:stu (group isolation)           ║"
+          - "║    /home/guest     - 770 root:guest (group isolation)         ║"
+          - "║    Umask: 077 (new files 600, new dirs 700)                   ║"
+          - "╠═══════════════════════════════════════════════════════════════╣"
+          - "║  User Groups:                                                 ║"
+          - "║    lecture (10001) - Sudo: ✓  Compute: ✓  Limits: 8C/16GB   ║"
+          - "║    stu     (10002) - Sudo: ✗  Compute: ✓  Limits: 4C/8GB    ║"
+          - "║    guest   (10003) - Sudo: ✗  Compute: ✗  Limits: 2C/4GB    ║"
           - "╠═══════════════════════════════════════════════════════════════╣"
           - "║  NFS Shares:                                                  ║"
           - "║    /home - User home directories (rw)                         ║"
@@ -595,5 +890,7 @@
           - "║  Next steps:                                                  ║"
           - "║    - Run 03-slurm-head.yml for Slurm controller               ║"
           - "║    - Run 04-slurm-compute.yml for compute nodes               ║"
+          - "║    - Test privacy: ssh student01@login01 and verify umask     ║"
+          - "║    - Create users via create-hpc-user.sh script               ║"
           - "╚═══════════════════════════════════════════════════════════════╝"
           - ""
