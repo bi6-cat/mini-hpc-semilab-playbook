@@ -15,6 +15,7 @@
   roles:
     - freeipa-server
     - identity
+    - user-privacy
 
   post_tasks:
     - name: FreeIPA server status
@@ -42,6 +43,7 @@
 
   roles:
     - freeipa-client
+    - user-privacy
 
   post_tasks:
     - name: Verify IPA enrollment
