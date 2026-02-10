@@ -1,16 +1,16 @@
 ---
-- name: Assert quota is enabled
+- name: Verify quota is enabled in configuration
   ansible.builtin.assert:
     that:
       - quota_enabled | default(false) | bool
-    fail_msg: "quota_enabled must be true to use roles/quota"
+    fail_msg: "quota_enabled must be true to use quota role"
 
-- name: Detect filesystem backing quota_path
+- name: Detect filesystem type for quota path
   ansible.builtin.command: "findmnt -T {{ quota_path }} -no TARGET,FSTYPE"
   register: quota_findmnt
   changed_when: false
 
-- name: Parse quota mount info
+- name: Parse mount target and filesystem type
   ansible.builtin.set_fact:
     quota_mount_target: "{{ (quota_findmnt.stdout.split())[0] }}"
     quota_fstype: "{{ (quota_findmnt.stdout.split())[1] }}"
@@ -20,37 +20,32 @@
   register: quota_current_opts
   changed_when: false
 
-- name: Decide required quota mount options (user + group)
+- name: Determine required quota mount options
   ansible.builtin.set_fact:
     quota_required_opts: "{{ 'uquota,gquota' if quota_fstype == 'xfs' else 'usrquota,grpquota' }}"
 
-- name: Check if quota options already enabled
+- name: Check if remount is required
   ansible.builtin.set_fact:
     quota_needs_remount: >-
       {{ (quota_fstype == 'xfs' and ('uquota' not in quota_current_opts.stdout or 'gquota' not in quota_current_opts.stdout))
          or (quota_fstype in ['ext2','ext3','ext4'] and ('usrquota' not in quota_current_opts.stdout or 'grpquota' not in quota_current_opts.stdout)) }}
 
-- name: Debug mount state
+- name: Display quota configuration
   ansible.builtin.debug:
     msg:
-      - "Mount target: {{ quota_mount_target }}"
+      - "Mount: {{ quota_mount_target }}"
       - "Filesystem: {{ quota_fstype }}"
       - "Current options: {{ quota_current_opts.stdout }}"
       - "Required: {{ quota_required_opts }}"
-      - "Needs remount: {{ quota_needs_remount }}"
+      - "Remount needed: {{ quota_needs_remount }}"
 
-- name: Check XFS quota support (xfs_info)
+- name: Check XFS quota support
   ansible.builtin.command: "xfs_info {{ quota_mount_target }}"
   register: xfs_info_output
   changed_when: false
   when: quota_fstype == 'xfs'
 
-- name: Display XFS info
-  ansible.builtin.debug:
-    var: xfs_info_output.stdout_lines
-  when: quota_fstype == 'xfs'
-
-- name: Check if filesystem is busy (processes using /home)
+- name: Check filesystem usage before unmount (XFS only)
   ansible.builtin.command: "lsof +f -- {{ quota_mount_target }}"
   register: quota_lsof
   changed_when: false
@@ -59,23 +54,20 @@
     - quota_needs_remount | bool
     - quota_fstype == 'xfs'
 
-- name: Warn if filesystem is busy - require reboot
+- name: Warn if filesystem is busy (requires reboot)
   ansible.builtin.debug:
     msg:
-      - "WARNING: {{ quota_mount_target }} is busy ({{ quota_lsof.stdout_lines | length }} processes)"
+      - "WARNING: {{ quota_mount_target }} has {{ quota_lsof.stdout_lines | length }} active processes"
       - "Cannot unmount for quota activation."
-      - "OPTIONS:"
-      - "  1. Reboot storage node: sudo reboot"
-      - "  2. Stop all processes: fuser -km {{ quota_mount_target }}"
-      - "/etc/fstab has been updated with quota options."
-      - "After reboot, quota will be active automatically."
+      - "Options: 1) Reboot storage node  2) Kill processes: fuser -km {{ quota_mount_target }}"
+      - "/etc/fstab will be updated. Quota activates after reboot."
   when:
     - quota_needs_remount | bool
     - quota_fstype == 'xfs'
     - quota_lsof.rc == 0
     - quota_lsof.stdout | length > 0
 
-- name: Unmount filesystem to enable quota (XFS - only if not busy)
+- name: Unmount filesystem for quota enablement (XFS)
   ansible.builtin.command: "umount {{ quota_mount_target }}"
   when:
     - quota_needs_remount | bool
@@ -84,7 +76,7 @@
   register: quota_umount
   changed_when: true
 
-- name: Mount filesystem with quota options
+- name: Remount with quota options (XFS)
   ansible.builtin.command: "mount {{ quota_mount_target }}"
   when:
     - quota_needs_remount | bool
@@ -93,7 +85,7 @@
   register: quota_mount
   changed_when: true
 
-- name: Remount for ext filesystems
+- name: Remount with quota options (ext filesystems)
   ansible.builtin.command: "mount -o remount,{{ quota_required_opts }} {{ quota_mount_target }}"
   when:
     - quota_needs_remount | bool
@@ -101,18 +93,13 @@
   register: quota_remount
   changed_when: true
 
-- name: Verify mount after quota enable
+- name: Verify mount options after remount
   ansible.builtin.shell: "grep ' {{ quota_mount_target }} ' /proc/mounts | awk '{print $4}'"
   register: quota_verify_opts
   changed_when: false
   when: quota_needs_remount | bool
 
-- name: Display mount options after quota enable
-  ansible.builtin.debug:
-    msg: "Mount options now: {{ quota_verify_opts.stdout }}"
-  when: quota_verify_opts is defined and quota_verify_opts is not skipped
-
-- name: Verify quota is now enabled (XFS)
+- name: Verify XFS quota state
   ansible.builtin.command: "xfs_quota -x -c 'state' {{ quota_mount_target }}"
   register: xfs_quota_state
   changed_when: false
@@ -120,14 +107,7 @@
     - quota_fstype == 'xfs'
     - (quota_mount is changed or quota_remount is changed)
 
-- name: Display XFS quota state
-  ansible.builtin.debug:
-    var: xfs_quota_state.stdout_lines
-  when:
-    - quota_fstype == 'xfs'
-    - xfs_quota_state is defined
-
-- name: Check if /etc/fstab contains mount target
+- name: Identify mount in /etc/fstab
   ansible.builtin.shell: "grep -E '^[^#].*\\s{{ quota_mount_target }}\\s' /etc/fstab || true"
   register: quota_fstab_line
   changed_when: false
@@ -164,7 +144,7 @@
     - quota_needs_remount | bool
     - quota_fstab_append_opts | default('') | length > 0
 
-- name: Initialize ext filesystem quota database (ext2/3/4)
+- name: Initialize ext quota database
   ansible.builtin.command: "quotacheck -cugm {{ quota_mount_target }}"
   when:
     - quota_initialize_ext_filesystems | default(true) | bool
@@ -172,14 +152,13 @@
   changed_when: false
   failed_when: false
 
-- name: Enable quotas (ext2/3/4)
+- name: Enable ext filesystem quotas
   ansible.builtin.command: "quotaon -ug {{ quota_mount_target }}"
   when: quota_fstype in ['ext2','ext3','ext4']
   changed_when: false
   failed_when: false
 
-# Group quota (shared pool)
-- name: Check if quota is actually enabled now
+- name: Verify quota is active
   ansible.builtin.set_fact:
     quota_is_active: "{{ ('usrquota' in quota_verify_opts.stdout or 'uquota' in quota_verify_opts.stdout) and ('grpquota' in quota_verify_opts.stdout or 'gquota' in quota_verify_opts.stdout) if quota_verify_opts is defined and quota_verify_opts.stdout is defined else ('usrquota' in quota_current_opts.stdout or 'uquota' in quota_current_opts.stdout) and ('grpquota' in quota_current_opts.stdout or 'gquota' in quota_current_opts.stdout) }}"
 
@@ -197,13 +176,13 @@
     - quota_is_active | bool
   changed_when: false
 
-- name: Warn if quota not active yet
+- name: Warn if quota not yet active
   ansible.builtin.debug:
     msg:
-      - "Quota limits NOT applied - quota not active on {{ quota_mount_target }}."
-      - "Current mount options: {{ quota_current_opts.stdout }}"
-      - "Expected: usrquota,grpquota (or uquota,gquota for XFS)"
-      - "If /etc/fstab updated, reboot storage node and run playbook again."
+      - "WARNING: Quota not active on {{ quota_mount_target }}"
+      - "Current: {{ quota_current_opts.stdout }}"
+      - "Required: usrquota,grpquota (or uquota,gquota for XFS)"
+      - "If /etc/fstab was updated, reboot and re-run playbook."
   when:
     - not (quota_is_active | bool)
     - (quota_group_limits | default([])) | length > 0
@@ -250,9 +229,9 @@
     - (quota_user_limits | default([])) | length > 0
   changed_when: false
 
-- name: Display quota configuration summary
+- name: Display quota summary
   ansible.builtin.debug:
     msg:
-      - "Quota enabled on {{ quota_mount_target }} ({{ quota_fstype }})"
-      - "Group quotas: {{ quota_group_limits | default([]) | length }} configured"
-      - "User quotas: {{ quota_user_limits | default([]) | length }} configured"
+      - "Quota status: {{ 'active' if quota_is_active else 'inactive' }} on {{ quota_mount_target }} ({{ quota_fstype }})"
+      - "Group limits: {{ quota_group_limits | default([]) | length }}"
+      - "User limits: {{ quota_user_limits | default([]) | length }}"

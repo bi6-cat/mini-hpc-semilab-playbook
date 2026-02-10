@@ -51,7 +51,7 @@ user_groups:
   - name: lecture
     gid: 10001
     description: "Lecturers/Teachers Group"
-    sudo_access: true
+    sudo_access: false
     login_nodes: ['login']
     login_cpu: 8
     login_mem_gb: 16
