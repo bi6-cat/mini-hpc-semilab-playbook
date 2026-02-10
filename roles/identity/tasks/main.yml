@@ -1,39 +1,39 @@
 ---
-- name: Wait for FreeIPA to be ready
+- name: Wait for FreeIPA HTTPS service
   ansible.builtin.wait_for:
     port: 443
     host: "{{ ansible_fqdn }}"
     timeout: 120
 
-- name: Destroy existing Kerberos ticket (if any)
+- name: Destroy existing Kerberos tickets
   ansible.builtin.command: kdestroy -A
   changed_when: false
   failed_when: false
 
-- name: Get Kerberos ticket for admin
+- name: Obtain Kerberos TGT for admin
   ansible.builtin.shell: echo "{{ freeipa_admin_password }}" | kinit admin
   changed_when: false
   no_log: true
 
-- name: Check if HPC group exists
+- name: Check if admin group exists
   ansible.builtin.command: ipa group-show {{ admin_group }}
   register: group_check
   changed_when: false
   failed_when: false
 
-- name: Create HPC group
+- name: Create HPC admin group
   ansible.builtin.command: >
     ipa group-add {{ admin_group }}
-    --desc='HPC Users Group'
+    --desc='HPC Administrators'
   when: group_check.rc != 0
 
-- name: Check if HPC admin user exists
+- name: Check if admin user exists
   ansible.builtin.command: ipa user-show {{ admin_user }}
   register: user_check
   changed_when: false
   failed_when: false
 
-- name: Create HPC admin user with password
+- name: Create admin user with password
   ansible.builtin.expect:
     command: >
       ipa user-add {{ admin_user }}
@@ -48,7 +48,7 @@
   when: user_check.rc != 0
   no_log: false
 
-- name: Add user to HPC group
+- name: Add admin user to admin group
   ansible.builtin.command: ipa group-add-member {{ admin_group }} --users={{ admin_user }}
   register: group_member_result
   failed_when:
@@ -62,10 +62,10 @@
   changed_when: false
   failed_when: false
 
-- name: Add sudo rule for HPC admins
+- name: Create sudo rule for admin group
   ansible.builtin.command: >
     ipa sudorule-add {{ sudo_rule_name | default('hpc-admins') }}
-    --desc='Allow HPC admins full sudo access'
+    --desc='Unrestricted sudo for HPC administrators'
   when: sudorule_check.rc != 0
 
 - name: Check sudo rule configuration
@@ -75,19 +75,19 @@
   failed_when: false
   when: sudorule_check.rc == 0
 
-- name: Configure sudo rule - add user group
+- name: Configure sudo rule for group membership
   ansible.builtin.command: ipa sudorule-add-user {{ sudo_rule_name | default('hpc-admins') }} --groups={{ admin_group }}
   when: sudorule_check.rc == 0 and admin_group not in sudorule_details.stdout
   register: sudo_user_result
   changed_when: true
 
-- name: Configure sudo rule - add command ALL
+- name: Configure sudo rule to allow all commands
   ansible.builtin.command: ipa sudorule-mod {{ sudo_rule_name | default('hpc-admins') }} --cmdcat=all
   register: sudo_cmd_result
   changed_when: "'Modified' in sudo_cmd_result.stdout"
   failed_when: false
 
-- name: Configure sudo rule - add host ALL
+- name: Configure sudo rule to allow all hosts
   ansible.builtin.command: ipa sudorule-mod {{ sudo_rule_name | default('hpc-admins') }} --hostcat=all
   register: sudo_host_result
   changed_when: "'Modified' in sudo_host_result.stdout"
@@ -124,7 +124,40 @@
   loop_control:
     label: "{{ item.item.name }}"
 
-# Create HBAC rules for groups
+- name: Deploy /home directory on NFS storage
+  ansible.builtin.file:
+    path: "{{ nfs_home }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  delegate_to: "{{ groups['storage'][0] }}"
+  when: user_groups is defined
+
+- name: Create shared directories in /home
+  ansible.builtin.file:
+    path: "{{ nfs_home }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - tools
+    - software
+    - docs
+  delegate_to: "{{ groups['storage'][0] }}"
+
+- name: Create group home directories on NFS storage
+  ansible.builtin.file:
+    path: "{{ nfs_home }}/{{ item.name }}"
+    state: directory
+    owner: root
+    group: "{{ item.name }}"
+    mode: '0711'
+  loop: "{{ user_groups }}"
+  when: user_groups is defined
+  delegate_to: "{{ groups['storage'][0] }}"
+
 - name: Check if HBAC rules exist for user groups
   ansible.builtin.command: ipa hbacrule-show hbac-{{ item.name }}
   loop: "{{ user_groups }}"
@@ -156,7 +189,7 @@
   changed_when: "'Number of members added 1' in hbac_add_group.stdout"
   when: user_groups is defined
 
-- name: Configure HBAC rules - Add hosts based on group access
+- name: Configure HBAC rules for user group access by node type
   ansible.builtin.shell: |
     {% for node_type in item.login_nodes %}
     ipa hbacrule-add-host hbac-{{ item.name }} --hostgroups={{ node_type }} 2>/dev/null || true
@@ -166,66 +199,10 @@
   changed_when: false
   when: user_groups is defined
 
-# Create sudo rule for lecturers
-- name: Check if sudo rule for lecturers exists
-  ansible.builtin.command: ipa sudorule-show lecture-sudo
-  register: lecture_sudorule_check
-  changed_when: false
-  failed_when: false
-  when: user_groups is defined
-
-- name: Create sudo rule for lecturers
-  ansible.builtin.command: >
-    ipa sudorule-add lecture-sudo
-    --desc='Allow lecturers sudo access'
-  when:
-    - user_groups is defined
-    - lecture_sudorule_check.rc != 0
-
-- name: Configure sudo rule for lecturers - add group
-  ansible.builtin.command: ipa sudorule-add-user lecture-sudo --groups=lecture
-  register: lecture_sudo_user
-  failed_when:
-    - lecture_sudo_user.rc != 0
-    - "'already a member' not in lecture_sudo_user.stdout"
-  changed_when: "'Number of members added 1' in lecture_sudo_user.stdout"
-  when:
-    - user_groups is defined
-    - lecture_sudorule_check.rc == 0 or lecture_sudorule_check.rc != 0
-
-- name: Configure sudo rule for lecturers - add commands
-  ansible.builtin.command: ipa sudorule-mod lecture-sudo --cmdcat=all
-  register: lecture_sudo_cmd
-  changed_when: "'Modified' in lecture_sudo_cmd.stdout"
-  failed_when: false
-  when: user_groups is defined
-
-- name: Configure sudo rule for lecturers - add hosts
-  ansible.builtin.command: ipa sudorule-mod lecture-sudo --hostcat=all
-  register: lecture_sudo_host
-  changed_when: "'Modified' in lecture_sudo_host.stdout"
-  failed_when: false
-  when: user_groups is defined
-
-- name: Check sudo rule status
-  ansible.builtin.command: ipa sudorule-show lecture-sudo
-  register: rule_check
-  changed_when: false
-  failed_when: false
-  when: user_groups is defined
-
-- name: Enable sudo rule for lecturers
-  ansible.builtin.command: ipa sudorule-enable lecture-sudo
-  when: 
-    - user_groups is defined
-    - rule_check.rc == 0
-    - "'Enabled: FALSE' in rule_check.stdout"
-
-- name: Display created resources
+- name: Display identity configuration status
   ansible.builtin.debug:
     msg:
-      - "✓ Group: {{ admin_group }}"
-      - "✓ User: {{ admin_user }}"
-      - "✓ Sudo rule: {{ sudo_rule_name | default('hpc-admins') }}"
-      - "✓ User groups: {{ user_groups | map(attribute='name') | list | join(', ') if user_groups is defined else 'none' }}"
-      - "✓ Sample users: {{ sample_users | map(attribute='username') | list | join(', ') if sample_users is defined else 'none' }}"
+      - "Admin group: {{ admin_group }}"
+      - "Admin user: {{ admin_user }}"
+      - "Sudo rule: {{ sudo_rule_name | default('hpc-admins') }}"
+      - "User groups: {{ user_groups | map(attribute='name') | list | join(', ') if user_groups is defined else 'none' }}"
