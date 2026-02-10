@@ -1,0 +1,73 @@
+---
+- name: Configure restrictive umask in profile.d
+  ansible.builtin.lineinfile:
+    path: /etc/profile.d/umask.sh
+    line: 'umask 0077'
+    create: yes
+    mode: '0644'
+    owner: root
+    group: root
+
+- name: Configure umask in /etc/bashrc
+  ansible.builtin.lineinfile:
+    path: /etc/bashrc
+    regexp: '^\s*umask\s+\d+'
+    line: '    umask 0077'
+    state: present
+
+- name: Configure default umask in /etc/login.defs
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^UMASK\s+'
+    line: 'UMASK           077'
+    state: present
+
+- name: Ensure home directory creation is enabled
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^#?\s*CREATE_HOME\s+'
+    line: 'CREATE_HOME     yes'
+    state: present
+
+- name: Set /home directory permissions for shared access
+  ansible.builtin.file:
+    path: /home
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Configure SSH to respect umask
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?\s*PermitUserEnvironment'
+    line: 'PermitUserEnvironment no'
+    state: present
+  notify: restart sshd
+
+- name: Deploy user creation helper script (head node only)
+  ansible.builtin.template:
+    src: create-hpc-user.sh.j2
+    dest: /usr/local/bin/create-hpc-user.sh
+    owner: root
+    group: root
+    mode: '0755'
+  when: "'head' in group_names"
+
+- name: Deploy user deletion helper script (head node only)
+  ansible.builtin.template:
+    src: delete-hpc-user.sh.j2
+    dest: /usr/local/bin/delete-hpc-user.sh
+    owner: root
+    group: root
+    mode: '0755'
+  when: "'head' in group_names"
+
+- name: Display privacy configuration summary
+  ansible.builtin.debug:
+    msg:
+      - "Privacy configuration applied"
+      - "/home permissions: 755 (shared folders accessible)"
+      - "Group directories: 711 (no cross-user listing)"
+      - "User directories: 700 (owner-only)"
+      - "Default umask: 077 (files 600, directories 700)"

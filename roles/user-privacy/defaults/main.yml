@@ -1,0 +1,6 @@
+---
+# Default umask for user privacy
+user_umask: "0077"
+
+# Home directory permissions
+home_dir_mode: "0700"
