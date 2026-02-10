@@ -1,0 +1,148 @@
+#!/bin/bash
+# User deletion script for HPC cluster
+# Removes FreeIPA account, NFS home directory, and blacklists username
+
+set -e
+
+DOMAIN="{{ freeipa_domain }}"
+ADMIN_PASSWORD="{{ freeipa_admin_password }}"
+NFS_HOME="{{ nfs_home }}"
+STORAGE_NODE="{{ groups['storage'][0] }}"
+
+usage() {
+    cat << EOF
+Usage: $0 <username> [--force]
+
+Arguments:
+    username    Username to delete
+    --force     Skip confirmation prompt
+
+Examples:
+    $0 student10
+    $0 guest02 --force
+
+WARNING: Deletes FreeIPA account, home directory, and all user data.
+Username will be permanently blacklisted and cannot be reused.
+
+EOF
+    exit 1
+}
+
+# Check arguments
+if [ $# -lt 1 ]; then
+    usage
+fi
+
+USERNAME=$1
+FORCE=false
+
+if [ "$2" == "--force" ]; then
+    FORCE=true
+fi
+
+# Authenticate to FreeIPA
+echo "Obtaining Kerberos TGT..."
+echo "$ADMIN_PASSWORD" | kinit admin
+
+# Verify user exists
+if ! ipa user-show "$USERNAME" &>/dev/null; then
+    echo "Error: User $USERNAME not found in FreeIPA"
+    kdestroy
+    exit 1
+fi
+
+# Retrieve user metadata
+USER_INFO=$(ipa user-show "$USERNAME" --raw)
+USER_HOME=$(echo "$USER_INFO" | grep "homedirectory:" | awk '{print $2}')
+USER_GROUPS=$(ipa user-show "$USERNAME" | grep "Member of groups:" -A 10 | grep -v "Member of groups:" | xargs)
+
+echo "=========================================="
+echo "DELETE USER"
+echo "=========================================="
+echo "Username:       $USERNAME"
+echo "Home Directory: $USER_HOME"
+echo "Groups:         $USER_GROUPS"
+echo "=========================================="
+echo ""
+echo "WARNING: This will PERMANENTLY DELETE:"
+echo "  - FreeIPA account"
+echo "  - Home directory and all files"
+echo "  - Username will be blacklisted"
+echo ""
+echo "THIS OPERATION CANNOT BE UNDONE"
+echo "=========================================="
+echo ""
+
+# Confirmation prompt
+if [ "$FORCE" = false ]; then
+    read -p "Type 'DELETE' to confirm: " CONFIRM
+    if [ "$CONFIRM" != "DELETE" ]; then
+        echo "Deletion cancelled."
+        kdestroy
+        exit 0
+    fi
+fi
+
+# Delete FreeIPA account
+echo ""
+echo "Deleting FreeIPA account..."
+ipa user-del "$USERNAME" || {
+    echo "Error: Failed to delete FreeIPA account"
+    kdestroy
+    exit 1
+}
+
+echo "✓ FreeIPA account deleted"
+
+# Remove home directory from NFS storage
+if [ -n "$USER_HOME" ] && [ "$USER_HOME" != "/" ]; then
+    echo "Deleting home directory on NFS..."
+    
+    ssh -o StrictHostKeyChecking=no "$STORAGE_NODE" << EOSSH
+        if ! sudo -n true 2>/dev/null; then
+            echo "Error: NOPASSWD sudo is required on ${STORAGE_NODE}"
+            exit 1
+        fi
+
+        if [ -d "$USER_HOME" ]; then
+            echo "  Removing: $USER_HOME"
+            sudo -n rm -rf "$USER_HOME"
+            echo "  ✓ Deleted"
+        else
+            echo "  Home directory not found: $USER_HOME"
+        fi
+EOSSH
+    
+    if [ $? -eq 0 ]; then
+        echo "✓ Home directory deleted"
+    else
+        echo "⚠ Warning: Home directory deletion failed"
+        echo "  Manual cleanup required: $USER_HOME"
+    fi
+else
+    echo "⚠ Warning: Invalid home path, skipping"
+fi
+
+# Blacklist username to prevent reuse
+DELETED_USERS_FILE="/var/lib/hpc/deleted-users.txt"
+echo "Blacklisting username..."
+
+sudo mkdir -p $(dirname "$DELETED_USERS_FILE")
+
+if ! grep -q "^${USERNAME}$" "$DELETED_USERS_FILE" 2>/dev/null; then
+    echo "$USERNAME" | sudo tee -a "$DELETED_USERS_FILE" > /dev/null
+    echo "✓ Username blacklisted (prevents UID/GID conflicts)"
+else
+    echo "✓ Already blacklisted"
+fi
+
+kdestroy
+
+echo ""
+echo "=========================================="
+echo "User deletion completed"
+echo "=========================================="
+echo "Username: $USERNAME (blacklisted)"
+echo "Status:   DELETED (blacklisted)"
+echo "Note:     This username cannot be reused"
+echo "=========================================="

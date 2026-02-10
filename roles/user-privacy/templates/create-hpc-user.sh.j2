@@ -1,0 +1,152 @@
+#!/bin/bash
+# User provisioning script for HPC cluster
+# Creates FreeIPA user with group-based home directory on NFS
+
+set -e
+
+DOMAIN="{{ freeipa_domain }}"
+ADMIN_PASSWORD="{{ freeipa_admin_password }}"
+NFS_HOME="{{ nfs_home }}"
+STORAGE_NODE="{{ groups['storage'][0] }}"
+
+usage() {
+    cat << EOF
+Usage: $0 <username> <firstname> <lastname> <group>
+
+Arguments:
+    username    Username (alphanumeric, lowercase)
+    firstname   Given name
+    lastname    Surname
+    group       User group (lecture, stu, guest)
+
+Examples:
+    $0 lecture05 Teacher Five lecture
+    $0 student10 Student Ten stu
+
+Available groups:
+{% for group in user_groups %}
+    {{ group.name }}: {{ group.description }}
+{% endfor %}
+
+EOF
+    exit 1
+}
+
+# Check arguments
+if [ $# -ne 4 ]; then
+    usage
+fi
+
+USERNAME=$1
+FIRSTNAME=$2
+LASTNAME=$3
+GROUP=$4
+
+# Validate group membership
+VALID_GROUPS=({% for group in user_groups %}"{{ group.name }}" {% endfor %})
+if [[ ! " ${VALID_GROUPS[@]} " =~ " ${GROUP} " ]]; then
+    echo "Error: Invalid group '$GROUP'"
+    echo "Valid groups: ${VALID_GROUPS[@]}"
+    exit 1
+fi
+
+echo "=========================================="
+echo "Creating HPC User"
+echo "=========================================="
+echo "Username:  $USERNAME"
+echo "Name:      $FIRSTNAME $LASTNAME"
+echo "Group:     $GROUP"
+echo "Home:      ${NFS_HOME}/${GROUP}/${USERNAME}"
+echo "=========================================="
+echo ""
+
+# Check username blacklist (prevents reuse of deleted accounts)
+DELETED_USERS_FILE="/var/lib/hpc/deleted-users.txt"
+if [ -f "$DELETED_USERS_FILE" ] && grep -q "^${USERNAME}$" "$DELETED_USERS_FILE"; then
+    echo ""
+    echo "==========================================" 
+    echo "ERROR: Username '${USERNAME}' is blacklisted"
+    echo "==========================================" 
+    echo "This username was previously deleted and cannot be reused."
+    echo "Blacklist prevents UID/GID conflicts and permission issues."
+    echo ""
+    echo "View blacklist: cat $DELETED_USERS_FILE"
+    echo "==========================================" 
+    exit 1
+fi
+
+# Authenticate to FreeIPA
+echo "Obtaining Kerberos TGT..."
+echo "$ADMIN_PASSWORD" | kinit admin
+
+# Check if user already exists in FreeIPA
+if ipa user-show "$USERNAME" &>/dev/null; then
+    echo "Error: User $USERNAME already exists in FreeIPA"
+    kdestroy
+    exit 1
+fi
+
+# Check for existing home directory (orphaned from failed previous deletion)
+echo "Checking NFS storage..."
+HOME_EXISTS=$(ssh -o StrictHostKeyChecking=no "$STORAGE_NODE" "sudo -n test -d '${NFS_HOME}/${GROUP}/${USERNAME}' && echo 'yes' || echo 'no'")
+
+if [ "$HOME_EXISTS" = "yes" ]; then
+    echo ""
+    echo "==========================================" 
+    echo "ERROR: Home directory already exists"
+    echo "==========================================" 
+    echo "Path: ${NFS_HOME}/${GROUP}/${USERNAME}"
+    echo ""
+    echo "Likely cause: Previous deletion did not complete successfully."
+    echo ""
+    echo "Manual cleanup required:"
+    echo "  ssh $STORAGE_NODE"
+    echo "  sudo rm -rf ${NFS_HOME}/${GROUP}/${USERNAME}"
+    echo "==========================================" 
+    kdestroy
+    exit 1
+fi
+
+# Provision user in FreeIPA
+echo "Creating FreeIPA user..."
+ipa user-add "$USERNAME" \
+  --first="$FIRSTNAME" \
+  --last="$LASTNAME" \
+  --email="${USERNAME}@${DOMAIN}" \
+  --shell=/bin/bash \
+  --homedir="${NFS_HOME}/${GROUP}/${USERNAME}" \
+  --password
+
+# Add to group
+echo "Adding to group $GROUP..."
+ipa group-add-member "$GROUP" --users="$USERNAME" || {
+    echo "Warning: Group membership add failed (may already be member)"
+}
+
+# Create home directory on NFS storage
+echo "Creating home directory on NFS..."
+ssh -o StrictHostKeyChecking=no "$STORAGE_NODE" << EOSSH
+    if ! sudo -n true 2>/dev/null; then
+        echo "Error: NOPASSWD sudo is required on ${STORAGE_NODE}"
+        exit 1
+    fi
+
+    sudo -n mkdir -p "${NFS_HOME}/${GROUP}/${USERNAME}"
+    sudo -n chown "${USERNAME}:${GROUP}" "${NFS_HOME}/${GROUP}/${USERNAME}"
+    sudo -n chmod 700 "${NFS_HOME}/${GROUP}/${USERNAME}"
+
+    sudo -n ls -ld "${NFS_HOME}/${GROUP}/${USERNAME}"
+EOSSH
+
+echo ""
+echo "=========================================="
+echo "User provisioned successfully"
+echo "=========================================="
+echo "Username:       $USERNAME"
+echo "Home Directory: ${NFS_HOME}/${GROUP}/${USERNAME}"
+echo "Login:          ssh ${USERNAME}@login01"
+echo ""
+echo "NOTE: User must change password on first login"
+echo "=========================================="
+
+kdestroy
