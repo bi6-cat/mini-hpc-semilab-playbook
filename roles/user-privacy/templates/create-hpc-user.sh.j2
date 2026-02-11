@@ -109,8 +109,11 @@ fi
 
 # Provision user in FreeIPA
 echo "Creating FreeIPA user..."
-echo "Enter default password (user must change on first login)"
-ipa user-add "$USERNAME" \
+
+# Set default password (user must change on first login)
+DEFAULT_PASSWORD="0000"
+
+echo "$DEFAULT_PASSWORD" | ipa user-add "$USERNAME" \
   --first="$FIRSTNAME" \
   --last="$LASTNAME" \
   --email="${USERNAME}@${DOMAIN}" \
@@ -148,6 +151,7 @@ echo "=========================================="
 echo "User provisioned successfully"
 echo "=========================================="
 echo "Username:       $USERNAME"
+echo "Password:       0000 (default, must change on first login)"
 echo "Home Directory: ${NFS_HOME}/${GROUP}/${USERNAME}"
 echo "Login:          ssh ${USERNAME}@login01"
 echo ""
