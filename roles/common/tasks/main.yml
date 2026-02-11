@@ -33,9 +33,14 @@
       {% endfor %}
     marker: "# {mark} ANSIBLE MANAGED - HPC CLUSTER"
 
+- name: Read current timezone
+  ansible.builtin.command: timedatectl show --property=Timezone --value
+  register: current_timezone
+  changed_when: false
+
 - name: Set timezone
-  ansible.builtin.timezone:
-    name: "{{ timezone }}"
+  ansible.builtin.command: timedatectl set-timezone "{{ timezone }}"
+  when: current_timezone.stdout != timezone
 
 - name: Configure chronyd
   ansible.builtin.systemd:
