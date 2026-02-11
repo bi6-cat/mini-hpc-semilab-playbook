@@ -109,6 +109,7 @@ fi
 
 # Provision user in FreeIPA
 echo "Creating FreeIPA user..."
+echo "Enter default password (user must change on first login)"
 ipa user-add "$USERNAME" \
   --first="$FIRSTNAME" \
   --last="$LASTNAME" \
@@ -132,7 +133,11 @@ ssh -o StrictHostKeyChecking=no "$STORAGE_NODE" << EOSSH
     fi
 
     sudo -n mkdir -p "${NFS_HOME}/${GROUP}/${USERNAME}"
-    sudo -n chown "${USERNAME}:${GROUP}" "${NFS_HOME}/${GROUP}/${USERNAME}"
+    
+    # Copy /etc/skel to initialize user home with defaults
+    sudo -n cp -r /etc/skel/. "${NFS_HOME}/${GROUP}/${USERNAME}/"
+    
+    sudo -n chown -R "${USERNAME}:${GROUP}" "${NFS_HOME}/${GROUP}/${USERNAME}"
     sudo -n chmod 700 "${NFS_HOME}/${GROUP}/${USERNAME}"
 
     sudo -n ls -ld "${NFS_HOME}/${GROUP}/${USERNAME}"
