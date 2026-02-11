@@ -110,6 +110,16 @@ fi
 # Provision user in FreeIPA
 echo "Creating FreeIPA user..."
 
+# Get GID of target group for setting as primary group
+GROUP_GID=$(ipa group-show "$GROUP" --raw | grep "gidnumber:" | awk '{print $2}')
+if [ -z "$GROUP_GID" ]; then
+    echo "Error: Could not determine GID for group $GROUP"
+    kdestroy
+    exit 1
+fi
+
+echo "Group $GROUP has GID: $GROUP_GID"
+
 # Set default password (user must change on first login)
 DEFAULT_PASSWORD="0000"
 
@@ -119,9 +129,10 @@ echo "$DEFAULT_PASSWORD" | ipa user-add "$USERNAME" \
   --email="${USERNAME}@${DOMAIN}" \
   --shell=/bin/bash \
   --homedir="${NFS_HOME}/${GROUP}/${USERNAME}" \
+  --gidnumber="$GROUP_GID" \
   --password
 
-# Add to group
+# Add to group (now as primary group member)
 echo "Adding to group $GROUP..."
 ipa group-add-member "$GROUP" --users="$USERNAME" || {
     echo "Warning: Group membership add failed (may already be member)"
