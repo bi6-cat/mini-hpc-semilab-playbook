@@ -1,0 +1,70 @@
+---
+# tasks file for nfs-server
+
+- name: Validate NFS exports config
+  ansible.builtin.assert:
+    that:
+      - nfs_server_enabled | default(false) | bool
+      - nfs_exports is defined
+      - nfs_exports | length > 0
+    fail_msg: "NFS server requires nfs_server_enabled=true and nfs_exports list"
+
+- name: Install NFS server packages
+  ansible.builtin.dnf:
+    name:
+      - nfs-utils
+      - rpcbind
+      - quota
+    state: present
+
+- name: Configure filesystem quotas (NFS server)
+  ansible.builtin.include_role:
+    name: quota
+  vars:
+    quota_path: "{{ nfs_home }}"
+  when: quota_enabled | default(false) | bool
+
+- name: Ensure export directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop: "{{ nfs_exports }}"
+
+- name: Configure /etc/exports
+  ansible.builtin.blockinfile:
+    path: /etc/exports
+    create: true
+    marker: "# {mark} ANSIBLE MANAGED - HPC NFS EXPORTS"
+    block: |
+      {% for e in nfs_exports %}
+      {{ e.path }} {{ e.clients }}({{ e.options }})
+      {% endfor %}
+  notify: Apply NFS exports
+
+- name: Enable and start rpcbind
+  ansible.builtin.systemd:
+    name: rpcbind
+    enabled: true
+    state: started
+
+- name: Enable and start NFS server
+  ansible.builtin.systemd:
+    name: nfs-server
+    enabled: true
+    state: started
+
+- name: Apply NFS export table
+  ansible.builtin.command: exportfs -ra
+  changed_when: false
+
+- name: Show exports
+  ansible.builtin.command: exportfs -v
+  register: exportfs_out
+  changed_when: false
+
+- name: Export status
+  ansible.builtin.debug:
+    var: exportfs_out.stdout_lines

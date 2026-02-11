@@ -1,0 +1,9 @@
+---
+# defaults file for nfs-client
+
+nfs_mounts: []
+# Example:
+# nfs_mounts:
+#   - path: /home
+#     server: storage01.local
+#     opts: "rw,hard,intr,nfsvers=3,tcp"

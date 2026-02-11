@@ -1,0 +1,26 @@
+---
+# tasks file for nfs-client
+
+- name: Install NFS client packages
+  ansible.builtin.dnf:
+    name:
+      - nfs-utils
+    state: present
+
+- name: Ensure mount points exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop: "{{ nfs_mounts | default([]) }}"
+
+- name: Mount NFS shares and persist
+  ansible.builtin.mount:
+    path: "{{ item.path }}"
+    src: "{{ item.server }}:{{ item.path }}"
+    fstype: nfs
+    opts: "{{ item.opts | default('rw,hard,intr,nfsvers=3,tcp') }}"
+    state: mounted
+  loop: "{{ nfs_mounts | default([]) }}"

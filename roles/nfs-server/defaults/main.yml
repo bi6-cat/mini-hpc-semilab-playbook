@@ -1,0 +1,13 @@
+---
+# defaults file for nfs-server
+
+nfs_server_enabled: false
+nfs_exports: []
+# Example:
+# nfs_exports:
+#   - path: /home
+#     clients: "*"
+#     options: "rw,sync,no_root_squash,no_subtree_check"
+
+quota_enabled: false
+nfs_home: /home
