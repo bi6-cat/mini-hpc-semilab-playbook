@@ -1,0 +1,15 @@
+---
+# defaults file for reboot
+
+reboot_msg: "Rebooting node as part of configuration"
+reboot_connect_timeout: 5
+reboot_timeout: 600
+reboot_pre_delay: 0
+reboot_post_delay: 30
+reboot_test_command: uptime
+
+wait_for_connection: true
+wait_connect_timeout: 20
+wait_sleep: 5
+wait_delay: 5
+wait_timeout: 300

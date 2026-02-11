@@ -1,0 +1,19 @@
+---
+# tasks file for reboot
+
+- name: Reboot node
+  ansible.builtin.reboot:
+    msg: "{{ reboot_msg }}"
+    connect_timeout: "{{ reboot_connect_timeout }}"
+    reboot_timeout: "{{ reboot_timeout }}"
+    pre_reboot_delay: "{{ reboot_pre_delay }}"
+    post_reboot_delay: "{{ reboot_post_delay }}"
+    test_command: "{{ reboot_test_command }}"
+
+- name: Wait for node to be reachable
+  ansible.builtin.wait_for_connection:
+    connect_timeout: "{{ wait_connect_timeout }}"
+    sleep: "{{ wait_sleep }}"
+    delay: "{{ wait_delay }}"
+    timeout: "{{ wait_timeout }}"
+  when: wait_for_connection | bool
