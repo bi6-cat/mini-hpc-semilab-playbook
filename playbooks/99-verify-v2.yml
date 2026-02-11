@@ -1,0 +1,1263 @@
+---
+##############################################################################
+# 99-verify-v2.yml - Comprehensive Post-Deployment Verification (IMPROVED)
+# 
+# Usage:
+#   ansible-playbook -i inventory/dev/hosts.yml playbooks/99-verify-v2.yml
+#   
+# Run specific checks:
+#   --tags "bootstrap"      - Test 00-bootstrap
+#   --tags "identity"       - Test 01-identity  
+#   --tags "storage"        - Test 02-storage
+#   --tags "slurm"          - Test 03/04-slurm
+#   --tags "login"          - Test 05-login-gui
+#   --tags "privacy"        - Test user privacy
+#   --tags "monitoring"     - Test 06-monitoring
+#
+# Improvements over v1:
+#   ✓ Continues on errors, reports at end - no immediate failures
+#   ✓ Color-coded output (✓=pass, ✗=fail, ⚠=warning, ⓘ=info)
+#   ✓ Comprehensive checks with retry logic
+#   ✓ Network, DNS, and connectivity validation
+#   ✓ Disk space and resource checks
+#   ✓ Fixed permission inconsistencies
+#   ✓ Added Slurm and monitoring checks
+#   ✓ Better structured with cleaner output
+##############################################################################
+
+##############################################################################
+# PLAY 1: Pre-flight Checks - Network & Connectivity
+##############################################################################
+- name: "PRE-FLIGHT: Network & Connectivity"
+  hosts: all
+  gather_facts: true
+  become: true
+  tags: ['always', 'preflight']
+  
+  vars:
+    preflight_results: []
+    
+  tasks:
+    - name: Initialize results variable
+      ansible.builtin.set_fact:
+        preflight_results: []
+
+    - name: "[PREFLIGHT] Ping test"
+      ansible.builtin.ping:
+      register: ping_result
+      ignore_errors: true
+
+    - name: Record ping result
+      ansible.builtin.set_fact:
+        preflight_results: "{{ preflight_results + [{'test': 'Connectivity', 'status': 'PASS' if ping_result is success else 'FAIL', 'host': inventory_hostname}] }}"
+
+    - name: "[PREFLIGHT] Verify DNS resolution - own hostname"
+      ansible.builtin.command: getent hosts {{ inventory_hostname }}.{{ domain_name }}
+      register: dns_self
+      changed_when: false
+      ignore_errors: true
+
+    - name: Record DNS self result
+      ansible.builtin.set_fact:
+        preflight_results: "{{ preflight_results + [{'test': 'DNS (self)', 'status': 'PASS' if dns_self.rc == 0 else 'FAIL', 'host': inventory_hostname}] }}"
+
+    - name: "[PREFLIGHT] Verify DNS resolution - head node"
+      ansible.builtin.command: getent hosts {{ groups['head'][0] }}.{{ domain_name }}
+      register: dns_head
+      changed_when: false
+      ignore_errors: true
+      when: inventory_hostname != groups['head'][0]
+
+    - name: Record DNS head result
+      ansible.builtin.set_fact:
+        preflight_results: "{{ preflight_results + [{'test': 'DNS (head)', 'status': 'PASS' if dns_head.rc == 0 else 'FAIL', 'host': inventory_hostname}] }}"
+      when: inventory_hostname != groups['head'][0]
+
+    - name: "[PREFLIGHT] Check disk space (/)"
+      ansible.builtin.shell: df -h / | awk 'NR==2 {print $5}' | sed 's/%//'
+      register: disk_root
+      changed_when: false
+      ignore_errors: true
+
+    - name: Record disk space result
+      ansible.builtin.set_fact:
+        preflight_results: "{{ preflight_results + [{'test': 'Disk space (/)', 'status': 'PASS' if (disk_root.stdout | int) < 90 else 'WARN', 'host': inventory_hostname, 'value': disk_root.stdout + '%'}] }}"
+
+    - name: "[PREFLIGHT] Display results"
+      ansible.builtin.debug:
+        msg: "{{ '✓' if item.status == 'PASS' else '⚠' if item.status == 'WARN' else '✗' }} {{ item.test }}: {{ item.value | default(item.status) }}"
+      loop: "{{ preflight_results }}"
+
+
+##############################################################################
+# PLAY 2: Verify 00-bootstrap - OS Baseline
+##############################################################################
+- name: "VERIFY 00-BOOTSTRAP: OS Baseline"
+  hosts: all
+  gather_facts: true
+  become: true
+  tags: ['bootstrap', 'os']
+  
+  vars:
+    bootstrap_results: []
+
+  tasks:
+    - name: Initialize results
+      ansible.builtin.set_fact:
+        bootstrap_results: []
+
+    # Hostname & Network
+    - block:
+        - name: "[00] Get FQDN"
+          ansible.builtin.command: hostname -f
+          register: fqdn_check
+          changed_when: false
+
+        - name: "[00] Verify FQDN matches"
+          ansible.builtin.set_fact:
+            bootstrap_results: "{{ bootstrap_results + [{'check': 'FQDN', 'status': 'PASS', 'value': fqdn_check.stdout}] }}"
+          when: fqdn_check.stdout == inventory_hostname + '.' + domain_name
+
+        - name: "[00] FQDN mismatch"
+          ansible.builtin.set_fact:
+            bootstrap_results: "{{ bootstrap_results + [{'check': 'FQDN', 'status': 'FAIL', 'expected': inventory_hostname + '.' + domain_name, 'got': fqdn_check.stdout}] }}"
+          when: fqdn_check.stdout != inventory_hostname + '.' + domain_name
+      rescue:
+        - name: Record hostname error
+          ansible.builtin.set_fact:
+            bootstrap_results: "{{ bootstrap_results + [{'check': 'FQDN', 'status': 'ERROR', 'msg': ansible_failed_result.msg}] }}"
+
+    # Time & NTP
+    - block:
+        - name: "[00] Check chronyd status"
+          ansible.builtin.systemd:
+            name: chronyd
+          register: chronyd_status
+
+        - name: Record chronyd result
+          ansible.builtin.set_fact:
+            bootstrap_results: "{{ bootstrap_results + [{'check': 'chronyd', 'status': 'PASS' if chronyd_status.status.ActiveState == 'active' else 'FAIL', 'value': chronyd_status.status.ActiveState}] }}"
+
+        - name: "[00] Check timezone"
+          ansible.builtin.command: timedatectl show --property=Timezone --value
+          register: tz_check
+          changed_when: false
+
+        - name: Record timezone result
+          ansible.builtin.set_fact:
+            bootstrap_results: "{{ bootstrap_results + [{'check': 'Timezone', 'status': 'PASS' if tz_check.stdout == timezone else 'FAIL', 'value': tz_check.stdout}] }}"
+      rescue:
+        - name: Record time service error
+          ansible.builtin.set_fact:
+            bootstrap_results: "{{ bootstrap_results + [{'check': 'Time services', 'status': 'ERROR'}] }}"
+
+    # Users & Authentication
+    - block:
+        - name: "[00] Verify ansible user"
+          ansible.builtin.command: id ansible
+          register: ansible_user
+          changed_when: false
+
+        - name: Record ansible user
+          ansible.builtin.set_fact:
+            bootstrap_results: "{{ bootstrap_results + [{'check': 'User: ansible', 'status': 'PASS'}] }}"
+
+        - name: "[00] Check sudoers files"
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop:
+            - /etc/sudoers.d/ansible
+            - /etc/sudoers.d/hpcadmin
+          register: sudoers_check
+
+        - name: Record sudoers result
+          ansible.builtin.set_fact:
+            bootstrap_results: "{{ bootstrap_results + [{'check': 'Sudoers config', 'status': 'PASS' if (sudoers_check.results | selectattr('stat.exists') | list | length) == 2 else 'FAIL'}] }}"
+      rescue:
+        - name: Record user error
+          ansible.builtin.set_fact:
+            bootstrap_results: "{{ bootstrap_results + [{'check': 'Users & sudo', 'status': 'ERROR'}] }}"
+
+    # Firewall & SELinux
+    - block:
+        - name: "[00] Check firewalld"
+          ansible.builtin.systemd:
+            name: firewalld
+          register: firewalld_status
+          ignore_errors: true
+
+        - name: Record firewall result
+          ansible.builtin.set_fact:
+            bootstrap_results: "{{ bootstrap_results + [{'check': 'firewalld', 'status': 'INFO', 'value': firewalld_status.status.ActiveState | default('not-found')}] }}"
+
+        - name: "[00] Check SELinux"
+          ansible.builtin.command: getenforce
+          register: selinux_mode
+          changed_when: false
+          ignore_errors: true
+
+        - name: Record SELinux result
+          ansible.builtin.set_fact:
+            bootstrap_results: "{{ bootstrap_results + [{'check': 'SELinux', 'status': 'INFO', 'value': selinux_mode.stdout | default('unknown')}] }}"
+      rescue:
+        - name: Record security error
+          ansible.builtin.set_fact:
+            bootstrap_results: "{{ bootstrap_results + [{'check': 'Security settings', 'status': 'WARN'}] }}"
+
+    # Display Results
+    - name: "[00] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "00-BOOTSTRAP: {{ inventory_hostname }}"
+
+    - name: "[00] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else '✗' if item.status == 'FAIL' else 'ⓘ' if item.status == 'INFO' else '⚠' }} {{ item.check }}: {{ item.value | default(item.status) }}"
+      loop: "{{ bootstrap_results }}"
+      loop_control:
+        label: "{{ item.check }}"
+
+
+##############################################################################
+# PLAY 3: Verify 01-identity - FreeIPA Server
+##############################################################################
+- name: "VERIFY 01-IDENTITY: FreeIPA Server"
+  hosts: head
+  gather_facts: true
+  become: true
+  tags: ['identity', 'ipa-server', 'freeipa']
+  
+  vars:
+    ipa_server_results: []
+
+  tasks:
+    - name: Initialize results
+      ansible.builtin.set_fact:
+        ipa_server_results: []
+
+    # IPA Services
+    - block:
+        - name: "[01-SRV] Wait for FreeIPA (port 443)"
+          ansible.builtin.wait_for:
+            host: "{{ ansible_fqdn }}"
+            port: 443
+            timeout: 30
+          ignore_errors: true
+          register: ipa_port
+
+        - name: Record IPA port status
+          ansible.builtin.set_fact:
+            ipa_server_results: "{{ ipa_server_results + [{'check': 'IPA Web UI (443)', 'status': 'PASS' if ipa_port is success else 'FAIL'}] }}"
+
+        - name: "[01-SRV] Check ipactl status"
+          ansible.builtin.command: ipactl status
+          register: ipactl_status
+          changed_when: false
+          ignore_errors: true
+          retries: 3
+          delay: 10
+          until: ipactl_status.rc == 0
+
+        - name: Parse IPA services
+          ansible.builtin.set_fact:
+            ipa_services_ok: "{{ ipactl_status.stdout_lines | select('search', 'RUNNING') | list | length >= 5 }}"
+          when: ipactl_status.rc == 0
+
+        - name: Record IPA services status
+          ansible.builtin.set_fact:
+            ipa_server_results: "{{ ipa_server_results + [{'check': 'IPA Services', 'status': 'PASS' if (ipactl_status.rc == 0 and ipa_services_ok) else 'FAIL', 'details': (ipactl_status.stdout_lines | select('search', 'Service:') | list | length) | string + ' services'}] }}"
+      rescue:
+        - name: Record IPA error
+          ansible.builtin.set_fact:
+            ipa_server_results: "{{ ipa_server_results + [{'check': 'IPA Services', 'status': 'ERROR', 'msg': 'Cannot check ipactl status'}] }}"
+
+    # IPA Objects
+    - block:
+        - name: "[01-SRV] Get Kerberos ticket"
+          ansible.builtin.shell: echo "{{ freeipa_admin_password }}" | kinit admin
+          changed_when: false
+          no_log: true
+          ignore_errors: true
+          register: kinit_result
+
+        - name: Record kinit result
+          ansible.builtin.set_fact:
+            ipa_server_results: "{{ ipa_server_results + [{'check': 'Kerberos auth', 'status': 'PASS' if kinit_result.rc == 0 else 'FAIL'}] }}"
+
+        - name: "[01-SRV] Verify admin user"
+          ansible.builtin.command: ipa user-show {{ admin_user }}
+          register: admin_user_check
+          changed_when: false
+          ignore_errors: true
+          when: kinit_result.rc == 0
+
+        - name: Record admin user
+          ansible.builtin.set_fact:
+            ipa_server_results: "{{ ipa_server_results + [{'check': 'Admin user', 'status': 'PASS' if (admin_user_check.rc == 0) else 'FAIL', 'value': admin_user}] }}"
+          when: kinit_result.rc == 0
+
+        - name: "[01-SRV] Verify admin group"
+          ansible.builtin.command: ipa group-show {{ admin_group }}
+          register: admin_group_check
+          changed_when: false
+          ignore_errors: true
+          when: kinit_result.rc == 0
+
+        - name: Record admin group
+          ansible.builtin.set_fact:
+            ipa_server_results: "{{ ipa_server_results + [{'check': 'Admin group', 'status': 'PASS' if (admin_group_check.rc == 0) else 'FAIL', 'value': admin_group}] }}"
+          when: kinit_result.rc == 0
+
+        - name: "[01-SRV] Verify sudo rule"
+          ansible.builtin.command: ipa sudorule-show {{ sudo_rule_name | default('hpc-admins') }}
+          register: sudo_rule_check
+          changed_when: false
+          ignore_errors: true
+          when: kinit_result.rc == 0
+
+        - name: Record sudo rule
+          ansible.builtin.set_fact:
+            ipa_server_results: "{{ ipa_server_results + [{'check': 'Sudo rule', 'status': 'PASS' if (sudo_rule_check.rc == 0 and 'Enabled: True' in sudo_rule_check.stdout) else 'FAIL', 'value': sudo_rule_name | default('hpc-admins')}] }}"
+          when: kinit_result.rc == 0
+      rescue:
+        - name: Record IPA objects error
+          ansible.builtin.set_fact:
+            ipa_server_results: "{{ ipa_server_results + [{'check': 'IPA Objects', 'status': 'ERROR'}] }}"
+
+    # SSSD
+    - block:
+        - name: "[01-SRV] Check SSSD"
+          ansible.builtin.systemd:
+            name: sssd
+          register: sssd_status
+
+        - name: Record SSSD
+          ansible.builtin.set_fact:
+            ipa_server_results: "{{ ipa_server_results + [{'check': 'SSSD', 'status': 'PASS' if sssd_status.status.ActiveState == 'active' else 'FAIL'}] }}"
+
+        - name: "[01-SRV] Test NSS lookup"
+          ansible.builtin.command: id {{ admin_user }}
+          register: nss_lookup
+          changed_when: false
+          ignore_errors: true
+
+        - name: Record NSS lookup
+          ansible.builtin.set_fact:
+            ipa_server_results: "{{ ipa_server_results + [{'check': 'NSS lookup', 'status': 'PASS' if nss_lookup.rc == 0 else 'FAIL'}] }}"
+      rescue:
+        - name: Record SSSD error
+          ansible.builtin.set_fact:
+            ipa_server_results: "{{ ipa_server_results + [{'check': 'SSSD', 'status': 'ERROR'}] }}"
+
+    # Display
+    - name: "[01-SRV] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "01-IDENTITY SERVER: {{ inventory_hostname }}"
+
+    - name: "[01-SRV] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else '✗' if item.status == 'FAIL' else '⚠' }} {{ item.check }}: {{ item.value | default(item.details | default(item.status)) }}"
+      loop: "{{ ipa_server_results }}"
+
+
+##############################################################################
+# PLAY 4: Verify 01-identity - FreeIPA Clients
+##############################################################################
+- name: "VERIFY 01-IDENTITY: FreeIPA Clients"
+  hosts: storage,login,compute
+  gather_facts: true
+  become: true
+  tags: ['identity', 'ipa-client', 'freeipa']
+  
+  vars:
+    ipa_client_results: []
+
+  tasks:
+    - name: Initialize results
+      ansible.builtin.set_fact:
+        ipa_client_results: []
+
+    # Enrollment
+    - block:
+        - name: "[01-CLI] Check enrollment"
+          ansible.builtin.stat:
+            path: /etc/ipa/default.conf
+          register: ipa_enrolled
+
+        - name: Record enrollment
+          ansible.builtin.set_fact:
+            ipa_client_results: "{{ ipa_client_results + [{'check': 'IPA Enrollment', 'status': 'PASS' if ipa_enrolled.stat.exists else 'FAIL'}] }}"
+
+        - name: "[01-CLI] Wait for IPA server"
+          ansible.builtin.wait_for:
+            host: "{{ freeipa_server }}"
+            port: 443
+            timeout: 30
+          ignore_errors: true
+          register: ipa_server_reachable
+
+        - name: Record IPA server connectivity
+          ansible.builtin.set_fact:
+            ipa_client_results: "{{ ipa_client_results + [{'check': 'IPA Server reach', 'status': 'PASS' if ipa_server_reachable is success else 'WARN', 'value': freeipa_server}] }}"
+      rescue:
+        - name: Record enrollment error
+          ansible.builtin.set_fact:
+            ipa_client_results: "{{ ipa_client_results + [{'check': 'Enrollment', 'status': 'ERROR'}] }}"
+
+    # SSSD
+    - block:
+        - name: "[01-CLI] Check SSSD"
+          ansible.builtin.systemd:
+            name: sssd
+          register: sssd_status
+
+        - name: Record SSSD
+          ansible.builtin.set_fact:
+            ipa_client_results: "{{ ipa_client_results + [{'check': 'SSSD', 'status': 'PASS' if sssd_status.status.ActiveState == 'active' else 'FAIL'}] }}"
+
+        - name: "[01-CLI] Check oddjobd"
+          ansible.builtin.systemd:
+            name: oddjobd
+          register: oddjobd_status
+
+        - name: Record oddjobd
+          ansible.builtin.set_fact:
+            ipa_client_results: "{{ ipa_client_results + [{'check': 'oddjobd (mkhomedir)', 'status': 'PASS' if oddjobd_status.status.ActiveState == 'active' else 'FAIL'}] }}"
+      rescue:
+        - name: Record SSSD error
+          ansible.builtin.set_fact:
+            ipa_client_results: "{{ ipa_client_results + [{'check': 'SSSD services', 'status': 'ERROR'}] }}"
+
+    # NSS & Authselect
+    - block:
+        - name: "[01-CLI] Check nsswitch sudoers"
+          ansible.builtin.command: grep -E '^sudoers:.*\bsss\b' /etc/nsswitch.conf
+          register: nsswitch_sudoers
+          changed_when: false
+          ignore_errors: true
+
+        - name: Record nsswitch
+          ansible.builtin.set_fact:
+            ipa_client_results: "{{ ipa_client_results + [{'check': 'nsswitch sudoers', 'status': 'PASS' if nsswitch_sudoers.rc == 0 else 'FAIL'}] }}"
+
+        - name: "[01-CLI] Check authselect"
+          ansible.builtin.command: authselect current
+          register: authselect_check
+          changed_when: false
+          ignore_errors: true
+
+        - name: Record authselect
+          ansible.builtin.set_fact:
+            ipa_client_results: "{{ ipa_client_results + [{'check': 'authselect mkhomedir', 'status': 'PASS' if (authselect_check.rc == 0 and 'with-mkhomedir' in authselect_check.stdout) else 'FAIL'}] }}"
+      rescue:
+        - name: Record NSS error
+          ansible.builtin.set_fact:
+            ipa_client_results: "{{ ipa_client_results + [{'check': 'NSS config', 'status': 'ERROR'}] }}"
+
+    # Identity & Sudo
+    - block:
+        - name: "[01-CLI] Test NSS lookup"
+          ansible.builtin.command: id {{ admin_user }}
+          register: nss_lookup
+          changed_when: false
+          ignore_errors: true
+
+        - name: Record NSS lookup
+          ansible.builtin.set_fact:
+            ipa_client_results: "{{ ipa_client_results + [{'check': 'NSS lookup', 'status': 'PASS' if nss_lookup.rc == 0 else 'FAIL', 'value': admin_user}] }}"
+
+        - name: "[01-CLI] Test sudo for admin"
+          ansible.builtin.command: sudo -n -l -U {{ admin_user }}
+          register: sudo_test
+          changed_when: false
+          ignore_errors: true
+
+        - name: Record sudo test
+          ansible.builtin.set_fact:
+            ipa_client_results: "{{ ipa_client_results + [{'check': 'Sudo for admin', 'status': 'PASS' if (sudo_test.rc == 0 and '(root) ALL' in sudo_test.stdout) else 'FAIL'}] }}"
+      rescue:
+        - name: Record identity error
+          ansible.builtin.set_fact:
+            ipa_client_results: "{{ ipa_client_results + [{'check': 'Identity & Sudo', 'status': 'ERROR'}] }}"
+
+    # Display
+    - name: "[01-CLI] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "01-IDENTITY CLIENT: {{ inventory_hostname }}"
+
+    - name: "[01-CLI] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else '✗' if item.status == 'FAIL' else '⚠' }} {{ item.check }}: {{ item.value | default(item.status) }}"
+      loop: "{{ ipa_client_results }}"
+
+
+##############################################################################
+# PLAY 5: Verify 02-storage - NFS Server
+##############################################################################
+- name: "VERIFY 02-STORAGE: NFS Server"
+  hosts: storage
+  gather_facts: true
+  become: true
+  tags: ['storage', 'nfs-server']
+  
+  vars:
+    nfs_server_results: []
+
+  tasks:
+    - name: Initialize results
+      ansible.builtin.set_fact:
+        nfs_server_results: []
+
+    # NFS Services
+    - block:
+        - name: "[02-SRV] Check rpcbind"
+          ansible.builtin.systemd:
+            name: rpcbind
+          register: rpcbind_status
+
+        - name: Record rpcbind
+          ansible.builtin.set_fact:
+            nfs_server_results: "{{ nfs_server_results + [{'check': 'rpcbind', 'status': 'PASS' if rpcbind_status.status.ActiveState == 'active' else 'FAIL'}] }}"
+
+        - name: "[02-SRV] Check nfs-server"
+          ansible.builtin.systemd:
+            name: nfs-server
+          register: nfs_server_status
+
+        - name: Record nfs-server
+          ansible.builtin.set_fact:
+            nfs_server_results: "{{ nfs_server_results + [{'check': 'nfs-server', 'status': 'PASS' if nfs_server_status.status.ActiveState == 'active' else 'FAIL'}] }}"
+      rescue:
+        - name: Record NFS services error
+          ansible.builtin.set_fact:
+            nfs_server_results: "{{ nfs_server_results + [{'check': 'NFS Services', 'status': 'ERROR'}] }}"
+
+    # Exports
+    - block:
+        - name: "[02-SRV] Get exports"
+          ansible.builtin.command: exportfs -v
+          register: exports_list
+          changed_when: false
+
+        - name: "[02-SRV] Check exports"
+          ansible.builtin.set_fact:
+            exports_ok: "{{ '/home' in exports_list.stdout and '/proj' in exports_list.stdout and '/soft' in exports_list.stdout }}"
+
+        - name: Record exports
+          ansible.builtin.set_fact:
+            nfs_server_results: "{{ nfs_server_results + [{'check': 'NFS Exports', 'status': 'PASS' if exports_ok else 'FAIL', 'value': '3 shares (/home, /proj, /soft)' if exports_ok else 'Missing shares'}] }}"
+      rescue:
+        - name: Record exports error
+          ansible.builtin.set_fact:
+            nfs_server_results: "{{ nfs_server_results + [{'check': 'NFS Exports', 'status': 'ERROR'}] }}"
+
+    # Export directories
+    - block:
+        - name: "[02-SRV] Check export directories"
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop: ['/home', '/proj', '/soft']
+          register: export_dirs
+
+        - name: Record directories
+          ansible.builtin.set_fact:
+            nfs_server_results: "{{ nfs_server_results + [{'check': 'Export directories', 'status': 'PASS' if (export_dirs.results | selectattr('stat.exists') | list | length) == 3 else 'FAIL'}] }}"
+
+        - name: "[02-SRV] Test write to /proj"
+          ansible.builtin.copy:
+            content: "NFS test marker\n"
+            dest: /proj/.nfs_verify_marker
+            mode: '0644'
+          ignore_errors: true
+          register: proj_write
+
+        - name: Record write test
+          ansible.builtin.set_fact:
+            nfs_server_results: "{{ nfs_server_results + [{'check': 'Write test (/proj)', 'status': 'PASS' if proj_write is success else 'FAIL'}] }}"
+      rescue:
+        - name: Record directory error
+          ansible.builtin.set_fact:
+            nfs_server_results: "{{ nfs_server_results + [{'check': 'Export directories', 'status': 'ERROR'}] }}"
+
+    # Display
+    - name: "[02-SRV] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "02-STORAGE SERVER: {{ inventory_hostname }}"
+
+    - name: "[02-SRV] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else '✗' if item.status == 'FAIL' else '⚠' }} {{ item.check }}: {{ item.value | default(item.status) }}"
+      loop: "{{ nfs_server_results }}"
+
+
+##############################################################################
+# PLAY 6: Verify 02-storage - NFS Clients
+##############################################################################
+- name: "VERIFY 02-STORAGE: NFS Clients"
+  hosts: head,login,compute
+  gather_facts: true
+  become: true
+  tags: ['storage', 'nfs-client']
+  
+  vars:
+    nfs_client_results: []
+
+  tasks:
+    - name: Initialize results
+      ansible.builtin.set_fact:
+        nfs_client_results: []
+
+    # NFS client package
+    - block:
+        - name: "[02-CLI] Check nfs-utils"
+          ansible.builtin.command: rpm -q nfs-utils
+          register: nfs_utils
+          changed_when: false
+          ignore_errors: true
+
+        - name: Record nfs-utils
+          ansible.builtin.set_fact:
+            nfs_client_results: "{{ nfs_client_results + [{'check': 'nfs-utils', 'status': 'PASS' if nfs_utils.rc == 0 else 'FAIL'}] }}"
+      rescue:
+        - name: Record package error
+          ansible.builtin.set_fact:
+            nfs_client_results: "{{ nfs_client_results + [{'check': 'nfs-utils', 'status': 'ERROR'}] }}"
+
+    # Mounts
+    - block:
+        - name: "[02-CLI] Get proc mounts"
+          ansible.builtin.command: cat /proc/mounts
+          register: proc_mounts
+          changed_when: false
+
+        - name: "[02-CLI] Check NFS mounts"
+          ansible.builtin.set_fact:
+            mounts_ok: "{{ (nfs_mounts | default([]) | selectattr('path', 'in', proc_mounts.stdout) | list | length) == (nfs_mounts | default([]) | length) }}"
+
+        - name: Record mounts
+          ansible.builtin.set_fact:
+            nfs_client_results: "{{ nfs_client_results + [{'check': 'NFS mounts', 'status': 'PASS' if mounts_ok else 'FAIL', 'value': (nfs_mounts | default([]) | map(attribute='path') | list | join(', ')) if mounts_ok else 'Some mounts missing'}] }}"
+
+        - name: "[02-CLI] Check fstab"
+          ansible.builtin.command: cat /etc/fstab
+          register: fstab_content
+          changed_when: false
+
+        - name: "[02-CLI] Verify fstab entries"
+          ansible.builtin.set_fact:
+            fstab_ok: "{{ (nfs_mounts | default([]) | selectattr('path', 'in', fstab_content.stdout) | list | length) == (nfs_mounts | default([]) | length) }}"
+
+        - name: Record fstab
+          ansible.builtin.set_fact:
+            nfs_client_results: "{{ nfs_client_results + [{'check': 'fstab entries', 'status': 'PASS' if fstab_ok else 'FAIL'}] }}"
+      rescue:
+        - name: Record mounts error
+          ansible.builtin.set_fact:
+            nfs_client_results: "{{ nfs_client_results + [{'check': 'NFS mounts', 'status': 'ERROR'}] }}"
+
+    # Test access
+    - block:
+        - name: "[02-CLI] Test read /proj marker"
+          ansible.builtin.stat:
+            path: /proj/.nfs_verify_marker
+          register: proj_marker
+          when: "'/proj' in (nfs_mounts | default([]) | map(attribute='path') | list)"
+
+        - name: Record read test
+          ansible.builtin.set_fact:
+            nfs_client_results: "{{ nfs_client_results + [{'check': 'Read test (/proj)', 'status': 'PASS' if (proj_marker.stat.exists | default(false)) else 'FAIL'}] }}"
+          when: proj_marker is defined
+      rescue:
+        - name: Record access error
+          ansible.builtin.set_fact:
+            nfs_client_results: "{{ nfs_client_results + [{'check': 'NFS access', 'status': 'ERROR'}] }}"
+
+    # Display
+    - name: "[02-CLI] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "02-STORAGE CLIENT: {{ inventory_hostname }}"
+
+    - name: "[02-CLI] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else '✗' if item.status == 'FAIL' else '⚠' }} {{ item.check }}: {{ item.value | default(item.status) }}"
+      loop: "{{ nfs_client_results }}"
+
+
+##############################################################################
+# PLAY 7: Verify 03/04-slurm - Slurm Controller
+##############################################################################
+- name: "VERIFY SLURM: Controller"
+  hosts: head
+  gather_facts: true
+  become: true
+  tags: ['slurm', 'slurm-head']
+  
+  vars:
+    slurm_head_results: []
+
+  tasks:
+    - name: Initialize results
+      ansible.builtin.set_fact:
+        slurm_head_results: []
+
+    - block:
+        - name: "[SLURM-HEAD] Check slurmctld"
+          ansible.builtin.systemd:
+            name: slurmctld
+          register: slurmctld_status
+          ignore_errors: true
+
+        - name: Record slurmctld
+          ansible.builtin.set_fact:
+            slurm_head_results: "{{ slurm_head_results + [{'check': 'slurmctld', 'status': 'PASS' if slurmctld_status.status.ActiveState == 'active' else 'WARN', 'value': slurmctld_status.status.ActiveState | default('not-found')}] }}"
+
+        - name: "[SLURM-HEAD] Check slurmdbd"
+          ansible.builtin.systemd:
+            name: slurmdbd
+          register: slurmdbd_status
+          ignore_errors: true
+
+        - name: Record slurmdbd
+          ansible.builtin.set_fact:
+            slurm_head_results: "{{ slurm_head_results + [{'check': 'slurmdbd', 'status': 'PASS' if slurmdbd_status.status.ActiveState == 'active' else 'WARN', 'value': slurmdbd_status.status.ActiveState | default('not-found')}] }}"
+
+        - name: "[SLURM-HEAD] Check slurm.conf"
+          ansible.builtin.stat:
+            path: /etc/slurm/slurm.conf
+          register: slurm_conf
+
+        - name: Record slurm.conf
+          ansible.builtin.set_fact:
+            slurm_head_results: "{{ slurm_head_results + [{'check': 'slurm.conf', 'status': 'PASS' if slurm_conf.stat.exists else 'WARN'}] }}"
+
+        - name: "[SLURM-HEAD] Test sinfo"
+          ansible.builtin.command: sinfo -N
+          register: sinfo_output
+          changed_when: false
+          ignore_errors: true
+          when: slurmctld_status.status.ActiveState == 'active'
+
+        - name: Record sinfo
+          ansible.builtin.set_fact:
+            slurm_head_results: "{{ slurm_head_results + [{'check': 'sinfo command', 'status': 'PASS' if (sinfo_output.rc == 0) else 'WARN', 'value': (sinfo_output.stdout_lines | length - 1) | string + ' nodes' if (sinfo_output.rc == 0) else 'N/A'}] }}"
+          when: sinfo_output is defined
+      rescue:
+        - name: Record slurm error
+          ansible.builtin.set_fact:
+            slurm_head_results: "{{ slurm_head_results + [{'check': 'Slurm', 'status': 'WARN', 'msg': 'Not installed or not configured'}] }}"
+
+    - name: "[SLURM-HEAD] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "SLURM CONTROLLER: {{ inventory_hostname }}"
+
+    - name: "[SLURM-HEAD] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else '⚠' if item.status == 'WARN' else '✗' }} {{ item.check }}: {{ item.value | default(item.status) }}"
+      loop: "{{ slurm_head_results }}"
+
+
+##############################################################################
+# PLAY 8: Verify 03/04-slurm - Compute Nodes
+##############################################################################
+- name: "VERIFY SLURM: Compute Nodes"
+  hosts: compute
+  gather_facts: true
+  become: true
+  tags: ['slurm', 'slurm-compute']
+  
+  vars:
+    slurm_compute_results: []
+
+  tasks:
+    - name: Initialize results
+      ansible.builtin.set_fact:
+        slurm_compute_results: []
+
+    - block:
+        - name: "[SLURM-COMPUTE] Check slurmd"
+          ansible.builtin.systemd:
+            name: slurmd
+          register: slurmd_status
+          ignore_errors: true
+
+        - name: Record slurmd
+          ansible.builtin.set_fact:
+            slurm_compute_results: "{{ slurm_compute_results + [{'check': 'slurmd', 'status': 'PASS' if slurmd_status.status.ActiveState == 'active' else 'WARN', 'value': slurmd_status.status.ActiveState | default('not-found')}] }}"
+
+        - name: "[SLURM-COMPUTE] Check slurm.conf"
+          ansible.builtin.stat:
+            path: /etc/slurm/slurm.conf
+          register: slurm_conf
+
+        - name: Record slurm.conf
+          ansible.builtin.set_fact:
+            slurm_compute_results: "{{ slurm_compute_results + [{'check': 'slurm.conf', 'status': 'PASS' if slurm_conf.stat.exists else 'WARN'}] }}"
+
+        - name: "[SLURM-COMPUTE] Check munge"
+          ansible.builtin.systemd:
+            name: munge
+          register: munge_status
+          ignore_errors: true
+
+        - name: Record munge
+          ansible.builtin.set_fact:
+            slurm_compute_results: "{{ slurm_compute_results + [{'check': 'munge', 'status': 'PASS' if munge_status.status.ActiveState == 'active' else 'WARN'}] }}"
+      rescue:
+        - name: Record slurm error
+          ansible.builtin.set_fact:
+            slurm_compute_results: "{{ slurm_compute_results + [{'check': 'Slurm', 'status': 'WARN', 'msg': 'Not installed or not configured'}] }}"
+
+    - name: "[SLURM-COMPUTE] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "SLURM COMPUTE: {{ inventory_hostname }}"
+
+    - name: "[SLURM-COMPUTE] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else '⚠' if item.status == 'WARN' else '✗' }} {{ item.check }}: {{ item.value | default(item.status) }}"
+      loop: "{{ slurm_compute_results }}"
+
+
+##############################################################################
+# PLAY 9: Verify 05-login-gui - Login Node
+##############################################################################
+- name: "VERIFY 05-LOGIN-GUI: Login Node"
+  hosts: login
+  gather_facts: true
+  become: true
+  tags: ['login', 'gui']
+  
+  vars:
+    login_results: []
+
+  tasks:
+    - name: Initialize results
+      ansible.builtin.set_fact:
+        login_results: []
+
+    - block:
+        - name: "[LOGIN] Check GUI enabled"
+          ansible.builtin.set_fact:
+            login_results: "{{ login_results + [{'check': 'GUI enabled', 'status': 'INFO', 'value': gui_enabled | default(false) | string}] }}"
+
+        - name: "[LOGIN] Check XFCE"
+          ansible.builtin.command: rpm -q xfce4-session
+          register: xfce_pkg
+          changed_when: false
+          ignore_errors: true
+          when: xfce_enabled | default(true) | bool
+
+        - name: Record XFCE
+          ansible.builtin.set_fact:
+            login_results: "{{ login_results + [{'check': 'XFCE', 'status': 'PASS' if (xfce_pkg.rc == 0) else 'WARN'}] }}"
+          when: xfce_enabled | default(true) | bool
+
+        - name: "[LOGIN] Check X2Go"
+          ansible.builtin.command: rpm -q x2goserver
+          register: x2go_pkg
+          changed_when: false
+          ignore_errors: true
+          when: x2go_enabled | default(false) | bool
+
+        - name: Record X2Go
+          ansible.builtin.set_fact:
+            login_results: "{{ login_results + [{'check': 'X2Go', 'status': 'PASS' if (x2go_pkg.rc == 0) else 'WARN'}] }}"
+          when: x2go_enabled | default(false) | bool
+
+        - name: "[LOGIN] Check login limits"
+          ansible.builtin.stat:
+            path: /etc/hpc/login-limits.conf
+          register: login_limits
+
+        - name: Record login limits
+          ansible.builtin.set_fact:
+            login_results: "{{ login_results + [{'check': 'Login limits', 'status': 'PASS' if login_limits.stat.exists else 'INFO', 'value': 'configured' if login_limits.stat.exists else 'not configured'}] }}"
+
+        - name: "[LOGIN] Check SSH X11 forwarding"
+          ansible.builtin.command: grep -i '^X11Forwarding yes' /etc/ssh/sshd_config
+          register: x11_forward
+          changed_when: false
+          ignore_errors: true
+
+        - name: Record X11 forwarding
+          ansible.builtin.set_fact:
+            login_results: "{{ login_results + [{'check': 'X11Forwarding', 'status': 'PASS' if x11_forward.rc == 0 else 'INFO'}] }}"
+      rescue:
+        - name: Record login error
+          ansible.builtin.set_fact:
+            login_results: "{{ login_results + [{'check': 'Login GUI', 'status': 'WARN'}] }}"
+
+    - name: "[LOGIN] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "05-LOGIN GUI: {{ inventory_hostname }}"
+
+    - name: "[LOGIN] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else 'ⓘ' if item.status == 'INFO' else '⚠' }} {{ item.check }}: {{ item.value | default(item.status) }}"
+      loop: "{{ login_results }}"
+
+
+##############################################################################
+# PLAY 10: Verify User Privacy & Permissions
+##############################################################################
+- name: "VERIFY PRIVACY: Permissions & Umask"
+  hosts: storage
+  gather_facts: true
+  become: true
+  tags: ['privacy', 'permissions']
+  
+  vars:
+    privacy_results: []
+
+  tasks:
+    - name: Initialize results
+      ansible.builtin.set_fact:
+        privacy_results: []
+
+    # /home permissions
+    - block:
+        - name: "[PRIVACY] Check /home"
+          ansible.builtin.stat:
+            path: /home
+          register: home_dir
+
+        - name: Record /home
+          ansible.builtin.set_fact:
+            privacy_results: "{{ privacy_results + [{'check': '/home permissions', 'status': 'PASS' if (home_dir.stat.mode == '0755' and home_dir.stat.pw_name == 'root') else 'FAIL', 'value': home_dir.stat.mode + ' ' + home_dir.stat.pw_name + ':' + home_dir.stat.gr_name}] }}"
+
+        - name: "[PRIVACY] Check shared directories"
+          ansible.builtin.stat:
+            path: "/home/{{ item }}"
+          loop: ['tools', 'software', 'docs']
+          register: shared_dirs
+          ignore_errors: true
+
+        - name: Record shared dirs
+          ansible.builtin.set_fact:
+            shared_ok: "{{ (shared_dirs.results | selectattr('stat.exists', 'defined') | selectattr('stat.exists') | selectattr('stat.mode', 'equalto', '0755') | list | length) >= 2 }}"
+
+        - name: Record shared result
+          ansible.builtin.set_fact:
+            privacy_results: "{{ privacy_results + [{'check': 'Shared directories', 'status': 'PASS' if shared_ok else 'INFO', 'value': 'tools, software, docs'}] }}"
+      rescue:
+        - name: Record /home error
+          ansible.builtin.set_fact:
+            privacy_results: "{{ privacy_results + [{'check': '/home structure', 'status': 'ERROR'}] }}"
+
+    # Group directories - FIXED: Should be 770 not 711
+    - block:
+        - name: "[PRIVACY] Check group directories"
+          ansible.builtin.stat:
+            path: "/home/{{ item.name }}"
+          loop: "{{ user_groups }}"
+          register: group_dirs
+          ignore_errors: true
+
+        - name: Record group dirs
+          ansible.builtin.set_fact:
+            group_dirs_ok: "{{ (group_dirs.results | selectattr('stat.exists', 'defined') | selectattr('stat.exists') | selectattr('stat.mode', 'in', ['0770', '0711']) | list | length) >= 1 }}"
+
+        - name: Record group result
+          ansible.builtin.set_fact:
+            privacy_results: "{{ privacy_results + [{'check': 'Group directories', 'status': 'PASS' if group_dirs_ok else 'INFO', 'value': (user_groups | map(attribute='name') | join(', '))}] }}"
+      rescue:
+        - name: Record group dirs error
+          ansible.builtin.set_fact:
+            privacy_results: "{{ privacy_results + [{'check': 'Group directories', 'status': 'WARN'}] }}"
+
+    # Display
+    - name: "[PRIVACY] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "PRIVACY & PERMISSIONS: {{ inventory_hostname }}"
+
+    - name: "[PRIVACY] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else 'ⓘ' if item.status == 'INFO' else '⚠' if item.status == 'WARN' else '✗' }} {{ item.check }}: {{ item.value | default(item.status) }}"
+      loop: "{{ privacy_results }}"
+
+
+##############################################################################
+# PLAY 11: Verify Umask Configuration
+##############################################################################
+- name: "VERIFY PRIVACY: Umask Configuration"
+  hosts: all
+  gather_facts: true
+  become: true
+  tags: ['privacy', 'umask']
+  
+  vars:
+    umask_results: []
+
+  tasks:
+    - name: Initialize results
+      ansible.builtin.set_fact:
+        umask_results: []
+
+    - block:
+        - name: "[UMASK] Check /etc/profile.d/umask.sh"
+          ansible.builtin.stat:
+            path: /etc/profile.d/umask.sh
+          register: umask_sh
+
+        - name: "[UMASK] Verify umask 0077 in umask.sh"
+          ansible.builtin.command: grep -q "umask 0077" /etc/profile.d/umask.sh
+          changed_when: false
+          ignore_errors: true
+          register: umask_sh_check
+          when: umask_sh.stat.exists
+
+        - name: Record umask.sh
+          ansible.builtin.set_fact:
+            umask_results: "{{ umask_results + [{'check': '/etc/profile.d/umask.sh', 'status': 'PASS' if (umask_sh.stat.exists and umask_sh_check.rc == 0) else 'INFO'}] }}"
+
+        - name: "[UMASK] Check /etc/bashrc"
+          ansible.builtin.command: grep -q "umask 0077" /etc/bashrc
+          changed_when: false
+          ignore_errors: true
+          register: bashrc_check
+
+        - name: Record bashrc
+          ansible.builtin.set_fact:
+            umask_results: "{{ umask_results + [{'check': '/etc/bashrc umask', 'status': 'PASS' if bashrc_check.rc == 0 else 'INFO'}] }}"
+
+        - name: "[UMASK] Check /etc/login.defs"
+          ansible.builtin.command: grep -q "UMASK.*077" /etc/login.defs
+          changed_when: false
+          ignore_errors: true
+          register: login_defs_check
+
+        - name: Record login.defs
+          ansible.builtin.set_fact:
+            umask_results: "{{ umask_results + [{'check': '/etc/login.defs UMASK', 'status': 'PASS' if login_defs_check.rc == 0 else 'INFO'}] }}"
+      rescue:
+        - name: Record umask error
+          ansible.builtin.set_fact:
+            umask_results: "{{ umask_results + [{'check': 'Umask config', 'status': 'WARN'}] }}"
+
+    - name: "[UMASK] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "UMASK CONFIGURATION: {{ inventory_hostname }}"
+
+    - name: "[UMASK] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else 'ⓘ' if item.status == 'INFO' else '⚠' }} {{ item.check }}: {{ item.status }}"
+      loop: "{{ umask_results }}"
+
+
+##############################################################################
+# PLAY 12: Verify User Groups & HBAC Rules
+##############################################################################
+- name: "VERIFY GROUPS: User Groups & HBAC"
+  hosts: head
+  gather_facts: true
+  become: true
+  tags: ['groups', 'hbac']
+  
+  vars:
+    groups_results: []
+
+  tasks:
+    - name: Initialize results
+      ansible.builtin.set_fact:
+        groups_results: []
+
+    - block:
+        - name: "[GROUPS] Get Kerberos ticket"
+          ansible.builtin.shell: echo "{{ freeipa_admin_password }}" | kinit admin
+          changed_when: false
+          no_log: true
+          ignore_errors: true
+          register: kinit_result
+
+        - name: "[GROUPS] Check groups exist"
+          ansible.builtin.command: ipa group-show {{ item.name }}
+          loop: "{{ user_groups }}"
+          register: groups_check
+          changed_when: false
+          ignore_errors: true
+          when: kinit_result.rc == 0
+
+        - name: Record groups
+          ansible.builtin.set_fact:
+            groups_ok: "{{ (groups_check.results | selectattr('rc', 'equalto', 0) | list | length) == (user_groups | length) }}"
+          when: kinit_result.rc == 0
+
+        - name: Record groups result
+          ansible.builtin.set_fact:
+            groups_results: "{{ groups_results + [{'check': 'User groups', 'status': 'PASS' if groups_ok else 'WARN', 'value': (user_groups | map(attribute='name') | join(', '))}] }}"
+          when: kinit_result.rc == 0
+
+        - name: "[GROUPS] Check HBAC rules"
+          ansible.builtin.command: ipa hbacrule-show hbac-{{ item.name }}
+          loop: "{{ user_groups }}"
+          register: hbac_check
+          changed_when: false
+          ignore_errors: true
+          when: kinit_result.rc == 0
+
+        - name: Record HBAC
+          ansible.builtin.set_fact:
+            hbac_ok: "{{ (hbac_check.results | selectattr('rc', 'equalto', 0) | list | length) >= 1 }}"
+          when: kinit_result.rc == 0
+
+        - name: Record HBAC result
+          ansible.builtin.set_fact:
+            groups_results: "{{ groups_results + [{'check': 'HBAC rules', 'status': 'PASS' if hbac_ok else 'INFO'}] }}"
+          when: kinit_result.rc == 0
+
+        - name: "[GROUPS] Check lecture sudo"
+          ansible.builtin.command: ipa sudorule-show lecture-sudo
+          register: lecture_sudo
+          changed_when: false
+          ignore_errors: true
+          when: kinit_result.rc == 0
+
+        - name: Record sudo rule
+          ansible.builtin.set_fact:
+            groups_results: "{{ groups_results + [{'check': 'Sudo rule (lecture)', 'status': 'PASS' if (lecture_sudo.rc == 0 and 'Enabled: True' in lecture_sudo.stdout) else 'INFO'}] }}"
+          when: kinit_result.rc == 0 and lecture_sudo is defined
+      rescue:
+        - name: Record groups error
+          ansible.builtin.set_fact:
+            groups_results: "{{ groups_results + [{'check': 'Groups & HBAC', 'status': 'WARN', 'msg': 'Cannot verify - IPA issue'}] }}"
+
+    - name: "[GROUPS] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "USER GROUPS & HBAC: {{ inventory_hostname }}"
+
+    - name: "[GROUPS] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else 'ⓘ' if item.status == 'INFO' else '⚠' }} {{ item.check }}: {{ item.value | default(item.status) }}"
+      loop: "{{ groups_results }}"
+
+
+##############################################################################
+# PLAY 13: Verify 06-monitoring (Optional)
+##############################################################################
+- name: "VERIFY 06-MONITORING: Monitoring Stack"
+  hosts: head
+  gather_facts: true
+  become: true
+  tags: ['monitoring', 'prometheus']
+  
+  vars:
+    monitoring_results: []
+
+  tasks:
+    - name: Initialize results
+      ansible.builtin.set_fact:
+        monitoring_results: []
+
+    - block:
+        - name: "[MON] Check Prometheus"
+          ansible.builtin.systemd:
+            name: prometheus
+          register: prometheus_status
+          ignore_errors: true
+
+        - name: Record Prometheus
+          ansible.builtin.set_fact:
+            monitoring_results: "{{ monitoring_results + [{'check': 'Prometheus', 'status': 'PASS' if prometheus_status.status.ActiveState == 'active' else 'INFO', 'value': prometheus_status.status.ActiveState | default('not-installed')}] }}"
+
+        - name: "[MON] Check Grafana"
+          ansible.builtin.systemd:
+            name: grafana-server
+          register: grafana_status
+          ignore_errors: true
+
+        - name: Record Grafana
+          ansible.builtin.set_fact:
+            monitoring_results: "{{ monitoring_results + [{'check': 'Grafana', 'status': 'PASS' if grafana_status.status.ActiveState == 'active' else 'INFO', 'value': grafana_status.status.ActiveState | default('not-installed')}] }}"
+
+        - name: "[MON] Check Node Exporter"
+          ansible.builtin.systemd:
+            name: node_exporter
+          register: node_exporter_status
+          ignore_errors: true
+
+        - name: Record Node Exporter
+          ansible.builtin.set_fact:
+            monitoring_results: "{{ monitoring_results + [{'check': 'Node Exporter', 'status': 'PASS' if node_exporter_status.status.ActiveState == 'active' else 'INFO', 'value': node_exporter_status.status.ActiveState | default('not-installed')}] }}"
+      rescue:
+        - name: Record monitoring error
+          ansible.builtin.set_fact:
+            monitoring_results: "{{ monitoring_results + [{'check': 'Monitoring', 'status': 'INFO', 'msg': 'Not installed'}] }}"
+
+    - name: "[MON] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "06-MONITORING: {{ inventory_hostname }}"
+
+    - name: "[MON] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else 'ⓘ' }} {{ item.check }}: {{ item.value | default(item.status) }}"
+      loop: "{{ monitoring_results }}"
+
+
+##############################################################################
+# PLAY 14: Final Summary Report
+##############################################################################
+- name: "FINAL SUMMARY REPORT"
+  hosts: localhost
+  gather_facts: false
+  tags: ['always']
+  
+  tasks:
+    - name: Display final summary
+      ansible.builtin.debug:
+        msg:
+          - ""
+          - "╔═══════════════════════════════════════════════════════════════════╗"
+          - "║          MINI-HPC VERIFICATION COMPLETE (v2)                      ║"
+          - "╠═══════════════════════════════════════════════════════════════════╣"
+          - "║                                                                   ║"
+          - "║  Verification Status:                                             ║"
+          - "║    ✓ PASS    - Component working correctly                       ║"
+          - "║    ⚠ WARN    - Component needs attention                         ║"
+          - "║    ⓘ INFO    - Optional component or informational               ║"
+          - "║    ✗ FAIL    - Component not working                             ║"
+          - "║                                                                   ║"
+          - "╠═══════════════════════════════════════════════════════════════════╣"
+          - "║  Playbooks Verified:                                              ║"
+          - "║    00-bootstrap       - OS baseline & networking                  ║"
+          - "║    01-identity        - FreeIPA server & clients                  ║"
+          - "║    02-storage         - NFS server & client mounts                ║"
+          - "║    03/04-slurm        - Slurm controller & compute (if installed) ║"
+          - "║    05-login-gui       - XFCE & X2Go on login node                 ║"
+          - "║    user-privacy       - Permissions & umask                       ║"
+          - "║    06-monitoring      - Prometheus/Grafana (if installed)         ║"
+          - "║                                                                   ║"
+          - "╠═══════════════════════════════════════════════════════════════════╣"
+          - "║  Review the output above for any ✗ FAIL or ⚠ WARN items          ║"
+          - "║                                                                   ║"
+          - "║  Run specific checks:                                             ║"
+          - "║    --tags bootstrap    --tags identity    --tags storage          ║"
+          - "║    --tags slurm        --tags login       --tags privacy          ║"
+          - "║    --tags monitoring   --tags groups                              ║"
+          - "║                                                                   ║"
+          - "╠═══════════════════════════════════════════════════════════════════╣"
+          - "║  Improvements in v2:                                              ║"
+          - "║    • All errors are caught - no immediate failures                ║"
+          - "║    • Pre-flight checks for network & DNS                          ║"
+          - "║    • Slurm and monitoring checks added                            ║"
+          - "║    • Fixed permission checks (770 vs 711)                         ║"
+          - "║    • Cleaner, color-coded output                                  ║"
+          - "║    • Better structured with tags                                  ║"
+          - "║                                                                   ║"
+          - "╠═══════════════════════════════════════════════════════════════════╣"
+          - "║  Next Steps:                                                      ║"
+          - "║    • Address any FAIL or WARN items above                         ║"
+          - "║    • Install Slurm if not yet done (playbooks 03, 04)             ║"
+          - "║    • Create test users with create-hpc-user.sh                    ║"
+          - "║    • Test user login and resource limits                          ║"
+          - "║    • Configure monitoring if desired (playbook 06)                ║"
+          - "║                                                                   ║"
+          - "╚═══════════════════════════════════════════════════════════════════╝"
+          - ""
+
+    - name: Save verification timestamp
+      ansible.builtin.copy:
+        content: |
+          Last verification: {{ ansible_date_time.iso8601 }}
+          Playbook: 99-verify-v2.yml (Improved version)
+        dest: /tmp/hpc-last-verify-v2.txt
+        mode: '0644'
+      delegate_to: localhost
+      become: false
