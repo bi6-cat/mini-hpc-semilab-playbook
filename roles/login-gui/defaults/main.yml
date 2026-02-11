@@ -49,3 +49,15 @@ gui_x2go_packages:
   - x2goserver
   - x2goserver-xsession
   - x2goserver-common
+
+# Wallpaper - When enabled, the role will deploy a PNG (ideally with transparent background)
+gui_branding_enabled: true
+
+# Provide a role-local file.
+gui_branding_logo_src: "branding/bg-logo.png"  # url under roles/login-gui/files/
+
+# Where to install the image on the target.
+gui_branding_wallpaper_path: /usr/share/backgrounds/hpc/login-logo.png
+
+# image-style: 0=centered, 1=tiled, 3=scaled 
+gui_branding_image_style: 1

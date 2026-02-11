@@ -63,6 +63,34 @@
     - xfce_enabled | default(true) | bool
     - gui_xfce_tuning_enabled | bool
 
+- name: Assert branding image source is provided
+  ansible.builtin.assert:
+    that:
+      - (gui_branding_logo_src | default('') | length) > 0
+    fail_msg: "Branding enabled but no logo source provided. Set gui_branding_logo_src (role file under roles/login-gui/files/...)."
+  when:
+    - gui_branding_enabled | default(false) | bool
+
+- name: Ensure branding wallpaper directory exists
+  ansible.builtin.file:
+    path: "{{ gui_branding_wallpaper_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - gui_branding_enabled | default(false) | bool
+
+- name: Deploy branding wallpaper from role file
+  ansible.builtin.copy:
+    src: "{{ gui_branding_logo_src }}"
+    dest: "{{ gui_branding_wallpaper_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - gui_branding_enabled | default(false) | bool
+
 - name: Disable XFWM compositor (global defaults)
   ansible.builtin.template:
     src: xfwm4.xml.j2
@@ -207,3 +235,27 @@
   ansible.builtin.command: which startxfce4
   changed_when: false
   when: xfce_enabled | default(true) | bool
+
+- name: Sync XFCE skel to storage node for new user creation
+  ansible.posix.synchronize:
+    src: /etc/skel/.config/
+    dest: /etc/skel/.config/
+    rsync_opts:
+      - "--chmod=D755,F644"
+  delegate_to: "{{ groups['storage'][0] }}"
+  when:
+    - xfce_enabled | default(true) | bool
+    - groups['storage'] is defined
+    - groups['storage'] | length > 0
+
+- name: Sync XFCE Xclients to storage node
+  ansible.posix.synchronize:
+    src: /etc/skel/.Xclients
+    dest: /etc/skel/.Xclients
+    rsync_opts:
+      - "--chmod=755"
+  delegate_to: "{{ groups['storage'][0] }}"
+  when:
+    - xfce_enabled | default(true) | bool
+    - groups['storage'] is defined
+    - groups['storage'] | length > 0
