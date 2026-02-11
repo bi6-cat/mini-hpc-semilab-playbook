@@ -1,0 +1,40 @@
+---
+# tasks file for ipa-verify
+
+- name: Get Kerberos ticket
+  ansible.builtin.shell: echo "{{ freeipa_admin_password }}" | kinit admin
+  changed_when: false
+  no_log: true
+
+- name: List all groups
+  ansible.builtin.command: ipa group-find --sizelimit=0
+  register: all_groups
+  changed_when: false
+  when: show_groups | bool
+
+- name: Display groups
+  ansible.builtin.debug:
+    msg: "{{ all_groups.stdout_lines }}"
+  when: show_groups | bool
+
+- name: List all HBAC rules
+  ansible.builtin.command: ipa hbacrule-find --sizelimit=0
+  register: all_hbac_rules
+  changed_when: false
+  when: show_hbac_rules | bool
+
+- name: Display HBAC rules
+  ansible.builtin.debug:
+    msg: "{{ all_hbac_rules.stdout_lines }}"
+  when: show_hbac_rules | bool
+
+- name: List all users
+  ansible.builtin.command: ipa user-find --sizelimit=0
+  register: all_users
+  changed_when: false
+  when: show_users | bool
+
+- name: Display users
+  ansible.builtin.debug:
+    msg: "{{ all_users.stdout_lines }}"
+  when: show_users | bool

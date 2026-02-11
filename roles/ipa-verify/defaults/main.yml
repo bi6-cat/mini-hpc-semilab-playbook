@@ -1,0 +1,11 @@
+---
+# defaults file for ipa-verify
+
+# FreeIPA admin credentials (should be set in group_vars)
+freeipa_admin_password: ""
+admin_user: "admin"
+
+# Output verbosity
+show_groups: true
+show_hbac_rules: true
+show_users: true
