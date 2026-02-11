@@ -235,27 +235,3 @@
   ansible.builtin.command: which startxfce4
   changed_when: false
   when: xfce_enabled | default(true) | bool
-
-- name: Sync XFCE skel to storage node for new user creation
-  ansible.posix.synchronize:
-    src: /etc/skel/.config/
-    dest: /etc/skel/.config/
-    rsync_opts:
-      - "--chmod=D755,F644"
-  delegate_to: "{{ groups['storage'][0] }}"
-  when:
-    - xfce_enabled | default(true) | bool
-    - groups['storage'] is defined
-    - groups['storage'] | length > 0
-
-- name: Sync XFCE Xclients to storage node
-  ansible.posix.synchronize:
-    src: /etc/skel/.Xclients
-    dest: /etc/skel/.Xclients
-    rsync_opts:
-      - "--chmod=755"
-  delegate_to: "{{ groups['storage'][0] }}"
-  when:
-    - xfce_enabled | default(true) | bool
-    - groups['storage'] is defined
-    - groups['storage'] | length > 0
