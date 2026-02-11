@@ -152,7 +152,7 @@
     path: "{{ nfs_home }}/{{ item.name }}"
     state: directory
     owner: root
-    group: "{{ item.name }}"
+    group: "{{ item.gid }}"
     mode: '0711'
   loop: "{{ user_groups }}"
   when: user_groups is defined
