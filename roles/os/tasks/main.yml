@@ -49,3 +49,10 @@
     content: "hpcadmin ALL=(ALL) NOPASSWD: ALL\n"
     mode: '0440'
     validate: '/usr/sbin/visudo -cf %s'
+
+- name: Ensure /usr/local/bin is in sudo secure_path
+  ansible.builtin.lineinfile:
+    path: /etc/sudoers
+    regexp: '^Defaults\s+secure_path\s*='
+    line: 'Defaults    secure_path = /sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin:/usr/local/sbin'
+    validate: '/usr/sbin/visudo -cf %s'
