@@ -148,12 +148,22 @@ SLURM_CLUSTER="{{ slurm_cluster_name }}"
 if [[ " ${COMPUTE_GROUPS[@]} " =~ " ${GROUP} " ]]; then
     echo "Registering user in Slurm accounting (cluster: ${SLURM_CLUSTER})..."
     if command -v sacctmgr &>/dev/null; then
-        sacctmgr -i add user "$USERNAME" Account="$GROUP" Cluster="$SLURM_CLUSTER" && \
-            echo "Slurm account: OK" || \
-            echo "Warning: Slurm registration failed — run manually: sacctmgr -i add user $USERNAME Account=$GROUP Cluster=$SLURM_CLUSTER"
+        if sudo -n sacctmgr -i add user "$USERNAME" Account="$GROUP" Cluster="$SLURM_CLUSTER"; then
+            sudo -n sacctmgr -i modify user where name="$USERNAME" set DefaultAccount="$GROUP" || true
+            echo "Slurm account: OK"
+        else
+            echo "Error: Slurm registration failed"
+            echo "Run manually on head node:"
+            echo "  sudo sacctmgr -i add user $USERNAME Account=$GROUP Cluster=$SLURM_CLUSTER"
+            echo "  sudo sacctmgr -i modify user where name=$USERNAME set DefaultAccount=$GROUP"
+            kdestroy
+            exit 1
+        fi
     else
-        echo "Warning: sacctmgr not found on this host. Run manually on head01:"
+        echo "Error: sacctmgr not found on this host. Run manually on head01:"
         echo "  sudo sacctmgr -i add user $USERNAME Account=$GROUP Cluster=$SLURM_CLUSTER"
+        kdestroy
+        exit 1
     fi
 else
     echo "Group '$GROUP' has no compute access — skipping Slurm registration."
