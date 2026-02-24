@@ -1,0 +1,146 @@
+---
+# Slurm Common Tasks
+# Setup shared configuration for all Slurm nodes
+
+- name: "Install EPEL repository"
+  dnf:
+    name: epel-release
+    state: present
+
+- name: "Enable PowerTools repository (required for Slurm deps on EL8)"
+  command: dnf config-manager --set-enabled powertools
+  register: powertools_result
+  failed_when: false
+  changed_when: "'Error' not in powertools_result.stderr"
+
+- name: "Install libaec (provides libsz.so.2 needed by slurm on EL8)"
+  dnf:
+    name: libaec
+    state: present
+  failed_when: false
+
+- name: "Install Munge packages"
+  dnf:
+    name:
+      - munge
+      - munge-libs
+    state: present
+
+- name: "Install Slurm base packages"
+  dnf:
+    name: "{{ slurm_packages }}"
+    state: present
+
+- name: "Create Slurm group"
+  group:
+    name: "{{ slurm_group }}"
+    gid: "{{ slurm_gid }}"
+    state: present
+
+- name: "Create Slurm user"
+  user:
+    name: "{{ slurm_user }}"
+    uid: "{{ slurm_uid }}"
+    group: "{{ slurm_group }}"
+    system: yes
+    shell: /bin/bash
+    home: /var/lib/slurm
+    createhome: yes
+    comment: "Slurm Workload Manager"
+    state: present
+
+- name: "Create Slurm directories"
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ slurm_user }}"
+    group: "{{ slurm_group }}"
+    mode: '0755'
+  loop:
+    - "{{ slurm_config_dir }}"
+    - "{{ slurm_log_dir }}"
+    - "{{ slurm_spool_dir }}"
+    - "{{ slurm_run_dir }}"
+
+- name: "Gather service facts"
+  service_facts:
+
+- name: "Generate Munge key on controller"
+  command: dd if=/dev/urandom bs=1 count=1024 of={{ munge_key_path }}
+  args:
+    creates: "{{ munge_key_path }}"
+  when: slurm_node_type == 'head'
+  become: yes
+
+- name: "Set Munge key permissions on controller"
+  file:
+    path: "{{ munge_key_path }}"
+    owner: "{{ munge_user }}"
+    group: "{{ munge_group }}"
+    mode: '0400'
+  when: slurm_node_type == 'head'
+
+- name: "Fetch Munge key from controller"
+  fetch:
+    src: "{{ munge_key_path }}"
+    dest: "/tmp/munge.key"
+    flat: yes
+  when: slurm_node_type == 'head'
+  become: yes
+
+- name: "Distribute Munge key to all nodes"
+  copy:
+    src: "/tmp/munge.key"
+    dest: "{{ munge_key_path }}"
+    owner: "{{ munge_user }}"
+    group: "{{ munge_group }}"
+    mode: '0400'
+  when: slurm_node_type != 'head'
+  notify: restart munge
+
+- name: "Enable and start Munge service"
+  systemd:
+    name: munge
+    enabled: yes
+    state: started
+
+- name: "Test Munge authentication"
+  shell: |
+    munge -n | unmunge | grep -q STATUS
+  register: munge_test
+  failed_when: false
+  changed_when: false
+
+- name: "Verify Munge is working"
+  assert:
+    that:
+      - munge_test.rc == 0
+    fail_msg: "Munge authentication test failed"
+    success_msg: "Munge authentication working correctly"
+
+- name: "Configure firewall for Munge (on controller)"
+  firewalld:
+    port: "{{ item }}"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  loop:
+    - "{{ slurm_slurmctld_port }}/tcp"
+    - "{{ slurm_slurmdbd_port }}/tcp"
+  when:
+    - slurm_node_type == 'head'
+    - ansible_facts.services['firewalld.service'] is defined
+    - ansible_facts.services['firewalld.service'].state == 'running'
+  ignore_errors: yes
+
+- name: "Configure firewall for Slurmd (on compute nodes)"
+  firewalld:
+    port: "{{ slurm_slurmd_port }}/tcp"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  when:
+    - slurm_node_type == 'compute'
+    - ansible_facts.services['firewalld.service'] is defined
+    - ansible_facts.services['firewalld.service'].state == 'running'
+  ignore_errors: yes

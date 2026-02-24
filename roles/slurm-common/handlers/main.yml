@@ -1,0 +1,12 @@
+---
+# Slurm Common Handlers
+
+- name: restart munge
+  systemd:
+    name: munge
+    state: restarted
+
+- name: reload munge
+  systemd:
+    name: munge
+    state: reloaded
