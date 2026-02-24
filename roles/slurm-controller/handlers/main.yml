@@ -1,0 +1,19 @@
+---
+# Slurm Controller Handlers
+
+- name: restart slurmdbd
+  systemd:
+    name: slurmdbd
+    state: restarted
+    daemon_reload: yes
+
+- name: restart slurmctld
+  systemd:
+    name: slurmctld
+    state: restarted
+    daemon_reload: yes
+
+- name: reload slurmctld
+  systemd:
+    name: slurmctld
+    state: reloaded
