@@ -8,6 +8,9 @@ DOMAIN="{{ freeipa_domain }}"
 ADMIN_PASSWORD="{{ freeipa_admin_password }}"
 NFS_HOME="{{ nfs_home }}"
 STORAGE_NODE="{{ groups['storage'][0] }}"
+STORAGE_USER="hpcadmin"   # SSH user with key-based auth to storage
+STORAGE_KEY="/home/hpcadmin/.ssh/id_ed25519"  # explicit key (script may run as root)
+SSH_CMD="ssh -o StrictHostKeyChecking=no -o BatchMode=yes -i $STORAGE_KEY"
 
 usage() {
     cat << EOF
@@ -98,7 +101,7 @@ echo "✓ FreeIPA account deleted"
 if [ -n "$USER_HOME" ] && [ "$USER_HOME" != "/" ]; then
     echo "Deleting home directory on NFS..."
     
-    ssh -o StrictHostKeyChecking=no "$STORAGE_NODE" << EOSSH
+    $SSH_CMD "$STORAGE_USER@$STORAGE_NODE" << EOSSH
         if ! sudo -n true 2>/dev/null; then
             echo "Error: NOPASSWD sudo is required on ${STORAGE_NODE}"
             exit 1

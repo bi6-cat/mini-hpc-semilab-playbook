@@ -8,6 +8,9 @@ DOMAIN="{{ freeipa_domain }}"
 ADMIN_PASSWORD="{{ freeipa_admin_password }}"
 NFS_HOME="{{ nfs_home }}"
 STORAGE_NODE="{{ groups['storage'][0] }}"
+STORAGE_USER="hpcadmin"   # SSH user with key-based auth to storage
+STORAGE_KEY="/home/hpcadmin/.ssh/id_ed25519"  # explicit key (script may run as root)
+SSH_CMD="ssh -o StrictHostKeyChecking=no -o BatchMode=yes -i $STORAGE_KEY"
 
 usage() {
     cat << EOF
@@ -88,7 +91,7 @@ fi
 
 # Check for existing home directory (orphaned from failed previous deletion)
 echo "Checking NFS storage..."
-HOME_EXISTS=$(ssh -o StrictHostKeyChecking=no "$STORAGE_NODE" "sudo -n test -d '${NFS_HOME}/${GROUP}/${USERNAME}' && echo 'yes' || echo 'no'")
+HOME_EXISTS=$($SSH_CMD "$STORAGE_USER@$STORAGE_NODE" "sudo -n test -d '${NFS_HOME}/${GROUP}/${USERNAME}' && echo 'yes' || echo 'no'")
 
 if [ "$HOME_EXISTS" = "yes" ]; then
     echo ""
@@ -138,9 +141,27 @@ ipa group-add-member "$GROUP" --users="$USERNAME" || {
     echo "Warning: Group membership add failed (may already be member)"
 }
 
+# Register user in Slurm accounting (only for groups with compute access)
+COMPUTE_GROUPS=({% for g in user_groups if g.compute_access %}"{{ g.name }}" {% endfor %})
+SLURM_CLUSTER="{{ slurm_cluster_name }}"
+
+if [[ " ${COMPUTE_GROUPS[@]} " =~ " ${GROUP} " ]]; then
+    echo "Registering user in Slurm accounting (cluster: ${SLURM_CLUSTER})..."
+    if command -v sacctmgr &>/dev/null; then
+        sacctmgr -i add user "$USERNAME" Account="$GROUP" Cluster="$SLURM_CLUSTER" && \
+            echo "Slurm account: OK" || \
+            echo "Warning: Slurm registration failed — run manually: sacctmgr -i add user $USERNAME Account=$GROUP Cluster=$SLURM_CLUSTER"
+    else
+        echo "Warning: sacctmgr not found on this host. Run manually on head01:"
+        echo "  sudo sacctmgr -i add user $USERNAME Account=$GROUP Cluster=$SLURM_CLUSTER"
+    fi
+else
+    echo "Group '$GROUP' has no compute access — skipping Slurm registration."
+fi
+
 # Create home directory on NFS storage
 echo "Creating home directory on NFS..."
-ssh -o StrictHostKeyChecking=no "$STORAGE_NODE" << EOSSH
+$SSH_CMD "$STORAGE_USER@$STORAGE_NODE" << EOSSH
     if ! sudo -n true 2>/dev/null; then
         echo "Error: NOPASSWD sudo is required on ${STORAGE_NODE}"
         exit 1
@@ -165,6 +186,11 @@ echo "Username:       $USERNAME"
 echo "Password:       0000 (default, must change on first login)"
 echo "Home Directory: ${NFS_HOME}/${GROUP}/${USERNAME}"
 echo "Login:          ssh ${USERNAME}@login01"
+if [[ " ${COMPUTE_GROUPS[@]} " =~ " ${GROUP} " ]]; then
+echo "Slurm Account:  $GROUP (cluster: ${SLURM_CLUSTER})"
+else
+echo "Slurm Access:   None (guest group)"
+fi
 echo ""
 echo "NOTE: User must change password on first login"
 echo "=========================================="
