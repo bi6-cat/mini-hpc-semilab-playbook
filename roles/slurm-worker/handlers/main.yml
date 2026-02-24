@@ -1,0 +1,13 @@
+---
+# Slurm Worker Handlers
+
+- name: restart slurmd
+  systemd:
+    name: slurmd
+    state: restarted
+    daemon_reload: yes
+
+- name: reload slurmd
+  systemd:
+    name: slurmd
+    state: reloaded

@@ -1,0 +1,98 @@
+---
+# Slurm Worker Tasks
+# Setup Slurm worker daemon on compute nodes
+
+- name: "Install Slurm worker packages"
+  dnf:
+    name: "{{ slurm_worker_packages }}"
+    state: present
+
+- name: "Create Slurmd spool directory"
+  file:
+    path: "{{ slurmd_spool_dir }}"
+    state: directory
+    owner: "{{ slurm_user }}"
+    group: "{{ slurm_group }}"
+    mode: '0755'
+
+# ==================== Fetch Configuration from Controller ====================
+
+- name: "Fetch slurm.conf from controller"
+  slurp:
+    src: "{{ slurm_config_dir }}/slurm.conf"
+  register: slurm_conf_content
+  delegate_to: "{{ slurm_control_machine }}"
+  become: yes
+
+- name: "Deploy slurm.conf to worker node"
+  copy:
+    content: "{{ slurm_conf_content.content | b64decode }}"
+    dest: "{{ slurm_config_dir }}/slurm.conf"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart slurmd
+
+- name: "Fetch cgroup.conf from controller"
+  slurp:
+    src: "{{ slurm_config_dir }}/cgroup.conf"
+  register: cgroup_conf_content
+  delegate_to: "{{ slurm_control_machine }}"
+  become: yes
+  failed_when: false
+
+- name: "Deploy cgroup.conf to worker node"
+  copy:
+    content: "{{ cgroup_conf_content.content | b64decode }}"
+    dest: "{{ slurm_config_dir }}/cgroup.conf"
+    owner: root
+    group: root
+    mode: '0644'
+  when: not cgroup_conf_content.failed
+  notify: restart slurmd
+
+# ==================== Cgroups v2 Configuration ====================
+
+- name: "Check if cgroups v2 is enabled"
+  stat:
+    path: /sys/fs/cgroup/cgroup.controllers
+  register: cgroup_v2
+
+- name: "Enable cgroups v2 controllers for Slurm"
+  shell: |
+    echo "+cpu +memory +pids" > /sys/fs/cgroup/cgroup.subtree_control
+  when: cgroup_v2.stat.exists
+  failed_when: false
+  changed_when: false
+
+# ==================== Enable and Start Slurmd ====================
+
+- name: "Enable and start Slurmd service"
+  systemd:
+    name: slurmd
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: "Wait for Slurmd to be ready"
+  wait_for:
+    port: "{{ slurm_slurmd_port }}"
+    delay: 2
+    timeout: 30
+
+- name: "Verify Slurmd is running"
+  systemd:
+    name: slurmd
+  register: slurmd_status
+  failed_when: slurmd_status.status.ActiveState != 'active'
+
+- name: "Check Slurmd connection to controller"
+  shell: |
+    systemctl status slurmd | grep -i "registered"
+  register: slurmd_registered
+  failed_when: false
+  changed_when: false
+
+- name: "Display Slurmd status"
+  debug:
+    msg: "Slurmd is {{ slurmd_status.status.ActiveState }} and running on port {{ slurm_slurmd_port }}"
