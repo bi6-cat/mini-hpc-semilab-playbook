@@ -1,8 +1,8 @@
 slurm_node_type: compute
 
 # CPU/Memory configuration
-cpu_cores: 2       
-memory_gb: 4       
+cpu_cores: 12
+memory_gb: 30     
 
 # Slurm settings
 slurm_cpu_count: "{{ cpu_cores }}"
