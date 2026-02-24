@@ -1,0 +1,165 @@
+---
+# This playbook sets up Slurm worker daemons on compute nodes:
+#   - Munge authentication (synced from controller)
+#   - Slurm configuration (synced from controller)
+#   - Slurm Worker Daemon (slurmd)
+#   - Cgroups for resource management
+#
+# Prerequisites:
+#   - 00-bootstrap.yml (OS setup, users)
+#   - 01-identity.yml (FreeIPA)
+#   - 02-storage.yml (NFS)
+#   - 03-slurm-head.yml (Slurm controller must be running)
+
+- name: "Install Slurm Workers on Compute Nodes"
+  hosts: compute
+  become: yes
+  gather_facts: yes
+  serial: 1  
+
+  pre_tasks:
+    - name: "Pre-flight checks"
+      block:
+        - name: "Verify this is a compute node"
+          assert:
+            that:
+              - slurm_node_type == 'compute'
+            fail_msg: "This playbook must run on compute nodes only"
+            success_msg: "Running on compute node: {{ inventory_hostname }}"
+
+        - name: "Check controller connectivity"
+          wait_for:
+            host: "{{ hostvars[slurm_control_machine]['ansible_host'] | default(slurm_control_machine) }}"
+            port: "{{ slurm_slurmctld_port }}"
+            timeout: 30
+          register: controller_check
+          failed_when: false
+
+        - name: "Verify controller is reachable"
+          assert:
+            that:
+              - controller_check is succeeded
+            fail_msg: "Cannot reach Slurm controller. Please run 03-slurm-head.yml first"
+            success_msg: "Controller is reachable on port {{ slurm_slurmctld_port }}"
+
+        - name: "Display node information"
+          debug:
+            msg:
+              - "Node: {{ inventory_hostname }}"
+              - "IP: {{ ansible_host }}"
+              - "CPUs: {{ slurm_cpu_count | default(2) }}"
+              - "Memory: {{ slurm_real_memory | default(4096) }} MB"
+              - "Controller: {{ slurm_control_machine }}"
+
+  roles:
+    - role: slurm-common
+      tags: ['slurm', 'slurm-common', 'munge']
+
+    - role: slurm-worker
+      tags: ['slurm', 'slurm-worker', 'slurmd']
+
+  post_tasks:
+    - name: "Post-installation verification"
+      block:
+        - name: "Check Munge service"
+          systemd:
+            name: munge
+          register: munge_status
+
+        - name: "Check Slurmd service"
+          systemd:
+            name: slurmd
+          register: slurmd_status
+
+        - name: "Display services status"
+          debug:
+            msg:
+              - "Munge: {{ munge_status.status.ActiveState }}"
+              - "Slurmd: {{ slurmd_status.status.ActiveState }}"
+
+        - name: "Test Munge authentication"
+          shell: munge -n | unmunge
+          register: munge_test
+          changed_when: false
+          failed_when: false
+
+        - name: "Display Munge test result"
+          debug:
+            msg: "{{ munge_test.stdout }}"
+          when: munge_test.rc == 0
+
+        - name: "Wait for node registration"
+          pause:
+            seconds: 5
+
+- name: "Update Controller Node List"
+  hosts: head
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: "Check all nodes status from controller"
+      command: sinfo -N
+      register: sinfo_output
+      changed_when: false
+
+    - name: "Display cluster status"
+      debug:
+        msg: "{{ sinfo_output.stdout_lines }}"
+
+    - name: "Set nodes to IDLE state if in UNKNOWN"
+      shell: |
+        unknown_nodes="$(sinfo -N -h -o "%N" -t unknown)"
+        for node in $unknown_nodes; do
+          scontrol update NodeName="$node" State=IDLE
+        done
+      register: node_update
+      changed_when: node_update.stdout | trim != ''
+      failed_when: false
+
+    - name: "Final cluster status"
+      command: sinfo
+      register: final_sinfo
+      changed_when: false
+
+
+- name: "Install Slurm Client Tools on Login Node"
+  hosts: login
+  become: yes
+  gather_facts: yes
+
+  roles:
+    - role: slurm-common
+      tags: ['slurm', 'slurm-common', 'munge', 'slurm-client']
+
+  post_tasks:
+    - name: "Sync slurm.conf from controller"
+      slurp:
+        src: "{{ slurm_config_dir }}/slurm.conf"
+      register: slurm_conf_content
+      delegate_to: "{{ slurm_control_machine }}"
+      become: yes
+      tags: ['slurm', 'slurm-client']
+
+    - name: "Deploy slurm.conf to login node"
+      copy:
+        content: "{{ slurm_conf_content.content | b64decode }}"
+        dest: "{{ slurm_config_dir }}/slurm.conf"
+        owner: root
+        group: root
+        mode: '0644'
+      tags: ['slurm', 'slurm-client']
+
+    - name: "Verify sbatch is available"
+      command: which sbatch
+      register: sbatch_check
+      changed_when: false
+      failed_when: sbatch_check.rc != 0
+
+    - name: "Display login node Slurm client status"
+      debug:
+        msg:
+          - "Login node Slurm client setup complete"
+          - "sbatch  : {{ sbatch_check.stdout }}"
+          - "Cluster : {{ slurm_cluster_name }}"
+          - "Controller: {{ slurm_control_machine }}"
