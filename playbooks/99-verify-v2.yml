@@ -10,6 +10,7 @@
 #   --tags "identity"       - Test 01-identity  
 #   --tags "storage"        - Test 02-storage
 #   --tags "slurm"          - Test 03/04-slurm
+#   --tags "slurm-job"      - Run Slurm end-to-end job smoke test
 #   --tags "login"          - Test 05-login-gui
 #   --tags "privacy"        - Test user privacy
 #   --tags "monitoring"     - Test 06-monitoring
@@ -814,6 +815,175 @@
       ansible.builtin.debug:
         msg: "  {{ '✓' if item.status == 'PASS' else '⚠' if item.status == 'WARN' else '✗' }} {{ item.check }}: {{ item.value | default(item.status) }}"
       loop: "{{ slurm_compute_results }}"
+
+
+##############################################################################
+# PLAY 8B: Verify Slurm End-to-End Job Execution
+##############################################################################
+- name: "VERIFY SLURM: End-to-End Job Smoke Test"
+  hosts: head
+  gather_facts: true
+  become: true
+  tags: ['slurm', 'slurm-job']
+
+  vars:
+    slurm_job_results: []
+    slurm_test_partition: "{{ (slurm_partitions | default([{'name': 'regular'}]) | first).name }}"
+    slurm_test_id: "{{ ansible_date_time.epoch }}"
+    slurm_smoke_script: "/tmp/slurm-smoke-{{ slurm_test_id }}.sh"
+
+  tasks:
+    - name: Initialize results
+      ansible.builtin.set_fact:
+        slurm_job_results: []
+
+    - block:
+        - name: "[SLURM-JOB] Check controller ping"
+          ansible.builtin.command: scontrol ping
+          register: slurm_ping
+          changed_when: false
+          failed_when: false
+
+        - name: Record controller ping
+          ansible.builtin.set_fact:
+            slurm_job_results: "{{ slurm_job_results + [{'check': 'scontrol ping', 'status': 'PASS' if (slurm_ping.rc == 0 and 'UP' in slurm_ping.stdout) else 'FAIL', 'value': slurm_ping.stdout | default('N/A')}] }}"
+
+        - name: "[SLURM-JOB] Check partition availability"
+          ansible.builtin.command: "sinfo -h -p {{ slurm_test_partition }} -o %P"
+          register: partition_check
+          changed_when: false
+          failed_when: false
+
+        - name: Record partition check
+          ansible.builtin.set_fact:
+            slurm_job_results: "{{ slurm_job_results + [{'check': 'Partition ' + slurm_test_partition, 'status': 'PASS' if partition_check.rc == 0 else 'FAIL'}] }}"
+
+        - name: "[SLURM-JOB] Check available associations"
+          ansible.builtin.command: "sacctmgr -nP list assoc cluster={{ slurm_cluster_name }} format=User,Account"
+          register: assoc_list
+          changed_when: false
+          failed_when: false
+
+        - name: Parse associations
+          ansible.builtin.set_fact:
+            assoc_candidates: "{{ assoc_list.stdout_lines | default([]) | map('trim') | reject('equalto', '') | list }}"
+
+        - name: Select test account
+          ansible.builtin.set_fact:
+            slurm_test_account: "{{ (assoc_candidates | first).split('|')[1] | default('') | trim }}"
+          when: assoc_candidates | length > 0
+
+        - name: Record association check
+          ansible.builtin.set_fact:
+            slurm_job_results: "{{ slurm_job_results + [{'check': 'Account association', 'status': 'PASS' if (assoc_candidates | length > 0 and (slurm_test_account | default('') | length > 0)) else 'FAIL', 'value': slurm_test_account | default('none')}] }}"
+
+        - name: "[SLURM-JOB] Ensure association exists"
+          ansible.builtin.assert:
+            that:
+              - assoc_candidates | length > 0
+              - slurm_test_account | default('') | length > 0
+            fail_msg: "No usable Slurm account association found. Create one with: sacctmgr -i add user <user> account=<account> cluster={{ slurm_cluster_name }}"
+
+        - name: "[SLURM-JOB] Create smoke job script"
+          ansible.builtin.copy:
+            dest: "{{ slurm_smoke_script }}"
+            mode: '0755'
+            content: |
+              #!/bin/bash
+              #SBATCH -J slurm_smoke
+              #SBATCH -p {{ slurm_test_partition }}
+              #SBATCH -A {{ slurm_test_account }}
+              #SBATCH -N 1
+              #SBATCH -n 1
+              #SBATCH -t 00:02:00
+              set -euo pipefail
+              echo "SLURM_SMOKE_OK"
+              hostname
+              sleep 1
+              exit 0
+
+        - name: "[SLURM-JOB] Submit smoke job"
+          ansible.builtin.command: "sbatch --parsable --chdir=/tmp {{ slurm_smoke_script }}"
+          register: submit_job
+          changed_when: true
+
+        - name: Parse job id
+          ansible.builtin.set_fact:
+            slurm_job_id: "{{ submit_job.stdout.split(';')[0] | trim }}"
+
+        - name: Record submission
+          ansible.builtin.set_fact:
+            slurm_job_results: "{{ slurm_job_results + [{'check': 'Job submission', 'status': 'PASS' if submit_job.rc == 0 else 'FAIL', 'value': 'job_id=' + slurm_job_id}] }}"
+
+        - name: "[SLURM-JOB] Wait until job leaves queue"
+          ansible.builtin.command: "squeue -h -j {{ slurm_job_id }} -o %T"
+          register: squeue_state
+          changed_when: false
+          retries: 60
+          delay: 2
+          until: squeue_state.stdout | trim == ''
+
+        - name: "[SLURM-JOB] Get final state from accounting"
+          ansible.builtin.command: "sacct -n -X -P -j {{ slurm_job_id }} --format=State"
+          register: sacct_state
+          changed_when: false
+          retries: 15
+          delay: 2
+          until: sacct_state.stdout | trim != ''
+
+        - name: Parse final job state
+          ansible.builtin.set_fact:
+            slurm_final_state: "{{ (sacct_state.stdout_lines | first | default('UNKNOWN')).split('|')[0] | trim }}"
+
+        - name: Record final state
+          ansible.builtin.set_fact:
+            slurm_job_results: "{{ slurm_job_results + [{'check': 'Job final state', 'status': 'PASS' if (slurm_final_state is match('^COMPLETED')) else 'FAIL', 'value': slurm_final_state}] }}"
+
+        - name: "[SLURM-JOB] Get node list used by job"
+          ansible.builtin.command: "sacct -n -X -P -j {{ slurm_job_id }} --format=NodeList"
+          register: sacct_nodes
+          changed_when: false
+          retries: 15
+          delay: 2
+          until: sacct_nodes.stdout | trim != ''
+
+        - name: Parse nodelist
+          ansible.builtin.set_fact:
+            slurm_job_nodelist: "{{ (sacct_nodes.stdout_lines | first | default('')).split('|')[0] | trim }}"
+
+        - name: Record node execution check
+          ansible.builtin.set_fact:
+            slurm_job_results: "{{ slurm_job_results + [{'check': 'Job executed on node', 'status': 'PASS' if (slurm_job_nodelist | length > 0 and slurm_job_nodelist != 'None assigned') else 'FAIL', 'value': slurm_job_nodelist | default('N/A')}] }}"
+
+        - name: "[SLURM-JOB] Assert smoke test success"
+          ansible.builtin.assert:
+            that:
+              - slurm_final_state is match('^COMPLETED')
+              - slurm_job_nodelist | length > 0
+              - slurm_job_nodelist != 'None assigned'
+            fail_msg: "Slurm end-to-end smoke test failed (job={{ slurm_job_id }}, state={{ slurm_final_state }})"
+
+      rescue:
+        - name: Record Slurm job smoke test error
+          ansible.builtin.set_fact:
+            slurm_job_results: "{{ slurm_job_results + [{'check': 'End-to-end smoke test', 'status': 'FAIL', 'value': ansible_failed_result.msg | default('Execution error')}] }}"
+
+      always:
+        - name: "[SLURM-JOB] Cleanup smoke files"
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ slurm_smoke_script }}"
+
+    - name: "[SLURM-JOB] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "SLURM END-TO-END: {{ inventory_hostname }}"
+
+    - name: "[SLURM-JOB] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else '✗' }} {{ item.check }}: {{ item.value | default(item.status) }}"
+      loop: "{{ slurm_job_results }}"
 
 
 ##############################################################################
