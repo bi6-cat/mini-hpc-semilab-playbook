@@ -1,0 +1,15 @@
+---
+# Node Exporter defaults
+
+node_exporter_repo_name: prometheus-rpm_release
+node_exporter_repo_baseurl: https://packagecloud.io/prometheus-rpm/release/el/8/$basearch
+node_exporter_repo_gpgkey: https://packagecloud.io/prometheus-rpm/release/gpgkey
+node_exporter_repo_gpgcheck: false
+node_exporter_repo_repo_gpgcheck: true
+node_exporter_repo_sslverify: true
+node_exporter_repo_metadata_expire: 300
+
+node_exporter_package: node_exporter
+node_exporter_package_version: ""
+node_exporter_service_name: node_exporter
+node_exporter_port: 9100

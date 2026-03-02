@@ -1,0 +1,44 @@
+---
+
+- name: Install EPEL repository
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+
+- name: Configure Prometheus RPM repository
+  ansible.builtin.yum_repository:
+    name: "{{ node_exporter_repo_name }}"
+    description: Prometheus RPM Release
+    baseurl: "{{ node_exporter_repo_baseurl }}"
+    enabled: yes
+    gpgcheck: "{{ 1 if node_exporter_repo_gpgcheck else 0 }}"
+    repo_gpgcheck: "{{ 1 if node_exporter_repo_repo_gpgcheck else 0 }}"
+    gpgkey: "{{ node_exporter_repo_gpgkey }}"
+    sslverify: "{{ 1 if node_exporter_repo_sslverify else 0 }}"
+    metadata_expire: "{{ node_exporter_repo_metadata_expire }}"
+
+- name: Install Node Exporter package
+  ansible.builtin.dnf:
+    name: "{{ node_exporter_package }}{{ '-' + node_exporter_package_version if (node_exporter_package_version | length > 0) else '' }}"
+    state: present
+
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
+- name: Configure firewall for Node Exporter
+  ansible.posix.firewalld:
+    port: "{{ node_exporter_port }}/tcp"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  when:
+    - ansible_facts.services['firewalld.service'] is defined
+    - ansible_facts.services['firewalld.service'].state == 'running'
+  ignore_errors: yes
+
+- name: Enable and start Node Exporter service
+  ansible.builtin.systemd:
+    name: "{{ node_exporter_service_name }}"
+    enabled: yes
+    state: started
+    daemon_reload: yes
