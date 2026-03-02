@@ -1,0 +1,44 @@
+---
+
+- name: Add Grafana repository
+  ansible.builtin.yum_repository:
+    name: grafana
+    description: Grafana OSS Repository
+    baseurl: "{{ grafana_repo_baseurl }}"
+    repo_gpgcheck: no
+    gpgcheck: no
+    enabled: yes
+  when: grafana_repo_enabled | bool
+
+- name: Install Grafana package
+  ansible.builtin.dnf:
+    name: "{{ grafana_package }}"
+    state: present
+
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
+- name: Configure firewall for Grafana
+  ansible.posix.firewalld:
+    port: "{{ grafana_port }}/tcp"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  when:
+    - ansible_facts.services['firewalld.service'] is defined
+    - ansible_facts.services['firewalld.service'].state == 'running'
+  ignore_errors: yes
+
+- name: Enable and start Grafana service
+  ansible.builtin.systemd:
+    name: "{{ grafana_service_name }}"
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Wait for Grafana port
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ grafana_port }}"
+    delay: 2
+    timeout: 30
