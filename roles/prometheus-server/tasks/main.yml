@@ -1,0 +1,68 @@
+---
+
+- name: Install EPEL repository
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+
+- name: Configure Prometheus RPM repository
+  ansible.builtin.yum_repository:
+    name: "{{ prometheus_repo_name }}"
+    description: Prometheus RPM Release
+    baseurl: "{{ prometheus_repo_baseurl }}"
+    enabled: yes
+    gpgcheck: "{{ 1 if prometheus_repo_gpgcheck else 0 }}"
+    repo_gpgcheck: "{{ 1 if prometheus_repo_repo_gpgcheck else 0 }}"
+    gpgkey: "{{ prometheus_repo_gpgkey }}"
+    sslverify: "{{ 1 if prometheus_repo_sslverify else 0 }}"
+    metadata_expire: "{{ prometheus_repo_metadata_expire }}"
+
+- name: Install Prometheus package
+  ansible.builtin.dnf:
+    name: "{{ prometheus_package }}{{ '-' + prometheus_package_version if (prometheus_package_version | length > 0) else '' }}"
+    state: present
+
+- name: Ensure Prometheus data directory exists
+  ansible.builtin.file:
+    path: "{{ prometheus_data_dir }}"
+    state: directory
+    owner: prometheus
+    group: prometheus
+    mode: '0755'
+
+- name: Deploy Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ prometheus_config_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart prometheus
+
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
+- name: Configure firewall for Prometheus
+  ansible.posix.firewalld:
+    port: "{{ prometheus_port }}/tcp"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  when:
+    - ansible_facts.services['firewalld.service'] is defined
+    - ansible_facts.services['firewalld.service'].state == 'running'
+  ignore_errors: yes
+
+- name: Enable and start Prometheus service
+  ansible.builtin.systemd:
+    name: "{{ prometheus_service_name }}"
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Wait for Prometheus port
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ prometheus_port }}"
+    delay: 2
+    timeout: 30

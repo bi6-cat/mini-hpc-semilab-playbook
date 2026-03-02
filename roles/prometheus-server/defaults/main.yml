@@ -1,0 +1,20 @@
+---
+# Prometheus server defaults
+
+prometheus_repo_name: prometheus-rpm_release
+prometheus_repo_baseurl: https://packagecloud.io/prometheus-rpm/release/el/8/$basearch
+prometheus_repo_gpgkey: https://packagecloud.io/prometheus-rpm/release/gpgkey
+prometheus_repo_gpgcheck: false
+prometheus_repo_repo_gpgcheck: true
+prometheus_repo_sslverify: true
+prometheus_repo_metadata_expire: 300
+
+prometheus_package: prometheus2
+prometheus_package_version: ""
+prometheus_service_name: prometheus
+prometheus_config_file: /etc/prometheus/prometheus.yml
+prometheus_data_dir: /var/lib/prometheus
+prometheus_port: 9090
+prometheus_scrape_interval: 15s
+prometheus_evaluation_interval: 15s
+prometheus_retention_time: 15d
