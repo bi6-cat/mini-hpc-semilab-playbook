@@ -27,3 +27,8 @@ nfs_mounts:
 # Monitoring
 prometheus_port: 9090
 grafana_port: 3000
+node_exporter_port: 9100
+prometheus_scrape_interval: 15s
+prometheus_evaluation_interval: 15s
+prometheus_retention_time: 15d
+grafana_repo_enabled: true
