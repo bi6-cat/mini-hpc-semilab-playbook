@@ -14,3 +14,13 @@ scrape_configs:
 {% for host in (groups['head'] | default([]) + groups['login'] | default([]) + groups['compute'] | default([])) | unique %}
           - '{{ hostvars[host].ansible_host | default(host) }}:{{ node_exporter_port }}'
 {% endfor %}
+{% for host in (groups['storage'] | default([])) | unique %}
+          - '{{ hostvars[host].ansible_host | default(host) }}:{{ node_exporter_port }}'
+{% endfor %}
+
+  - job_name: 'slurm-exporter'
+    static_configs:
+      - targets:
+{% for host in (groups['head'] | default([])) | unique %}
+          - '{{ hostvars[host].ansible_host | default(host) }}:{{ slurm_exporter_port }}'
+{% endfor %}

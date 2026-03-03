@@ -34,8 +34,8 @@ slurm_run_dir: /var/run/slurm
 # slurm_cluster_name: HPC-LAB
 
 # Controller configuration
-slurm_control_machine: "{{ (groups['head'] | default([]) | first) | default('head01') }}"
-slurm_control_addr: "{{ hostvars[slurm_control_machine]['ansible_host'] | default(slurm_control_machine) }}"
+slurm_control_machine: head01
+slurm_control_addr: "{{ hostvars['head01']['ansible_host'] }}"
 
 # Authentication
 slurm_auth_type: auth/munge
@@ -77,13 +77,23 @@ slurm_max_job_count: 10000
 slurm_max_array_size: 1000
 
 # Compute nodes configuration
-slurm_compute_nodes: "{{ groups['compute'] | default([]) }}"
+slurm_compute_nodes:
+  - name: compute01
+    addr: "{{ hostvars['compute01']['ansible_host'] }}"
+    cpus: "{{ hostvars['compute01']['slurm_cpu_count'] | default(2) }}"
+    memory: "{{ hostvars['compute01']['slurm_real_memory'] | default(4096) }}"
+    state: UNKNOWN
+  - name: compute02
+    addr: "{{ hostvars['compute02']['ansible_host'] }}"
+    cpus: "{{ hostvars['compute02']['slurm_cpu_count'] | default(2) }}"
+    memory: "{{ hostvars['compute02']['slurm_real_memory'] | default(4096) }}"
+    state: UNKNOWN
 
 # Partitions configuration
 slurm_partitions:
   - name: regular
-    nodes: "{{ slurm_compute_nodes | join(',') }}"
+    nodes: "compute[01-02]"
     default: "YES"
     max_time: "INFINITE"
     state: UP
-    max_nodes: "{{ slurm_compute_nodes | length }}"
+    max_nodes: 2

@@ -2,33 +2,25 @@
 # Slurm Common Tasks
 # Setup shared configuration for all Slurm nodes
 
+- name: "Include OS-specific variables"
+  include_vars: "{{ ansible_os_family }}.yml"
+  ignore_errors: true
+
 - name: "Install EPEL repository"
   dnf:
     name: epel-release
     state: present
 
-- name: "Enable PowerTools repository (required for Slurm deps on EL8)"
-  command: dnf config-manager --set-enabled powertools
-  register: powertools_result
-  failed_when: false
-  changed_when: "'Error' not in powertools_result.stderr"
-
-- name: "Install libaec (provides libsz.so.2 needed by slurm on EL8)"
+- name: "Install development tools"
   dnf:
-    name: libaec
+    name: "@Development Tools"
     state: present
-  failed_when: false
 
 - name: "Install Munge packages"
   dnf:
     name:
       - munge
       - munge-libs
-    state: present
-
-- name: "Install Slurm base packages"
-  dnf:
-    name: "{{ slurm_packages }}"
     state: present
 
 - name: "Create Slurm group"
@@ -62,14 +54,11 @@
     - "{{ slurm_spool_dir }}"
     - "{{ slurm_run_dir }}"
 
-- name: "Gather service facts"
-  service_facts:
-
 - name: "Generate Munge key on controller"
   command: dd if=/dev/urandom bs=1 count=1024 of={{ munge_key_path }}
   args:
     creates: "{{ munge_key_path }}"
-  when: slurm_node_type == 'head'
+  when: inventory_hostname == slurm_control_machine
   become: yes
 
 - name: "Set Munge key permissions on controller"
@@ -78,14 +67,14 @@
     owner: "{{ munge_user }}"
     group: "{{ munge_group }}"
     mode: '0400'
-  when: slurm_node_type == 'head'
+  when: inventory_hostname == slurm_control_machine
 
 - name: "Fetch Munge key from controller"
   fetch:
     src: "{{ munge_key_path }}"
     dest: "/tmp/munge.key"
     flat: yes
-  when: slurm_node_type == 'head'
+  when: inventory_hostname == slurm_control_machine
   become: yes
 
 - name: "Distribute Munge key to all nodes"
@@ -95,7 +84,7 @@
     owner: "{{ munge_user }}"
     group: "{{ munge_group }}"
     mode: '0400'
-  when: slurm_node_type != 'head'
+  when: inventory_hostname != slurm_control_machine
   notify: restart munge
 
 - name: "Enable and start Munge service"
@@ -128,7 +117,7 @@
     - "{{ slurm_slurmctld_port }}/tcp"
     - "{{ slurm_slurmdbd_port }}/tcp"
   when:
-    - slurm_node_type == 'head'
+    - inventory_hostname == slurm_control_machine
     - ansible_facts.services['firewalld.service'] is defined
     - ansible_facts.services['firewalld.service'].state == 'running'
   ignore_errors: yes
