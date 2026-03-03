@@ -1,7 +1,7 @@
 ---
 
 - name: "Install Node Exporter on all cluster nodes"
-  hosts: head,login,compute
+  hosts: head,login,compute,storage
   gather_facts: yes
   become: yes
 
@@ -13,6 +13,19 @@
     - role: node-exporter
       tags: ['monitoring', 'exporter', 'node-exporter']
 
+
+- name: "Install Slurm Exporter on head node"
+  hosts: head
+  gather_facts: yes
+  become: yes
+
+  pre_tasks:
+    - name: "Verify network connectivity"
+      ansible.builtin.ping:
+
+  roles:
+    - role: slurm-exporter
+      tags: ['monitoring', 'exporter', 'slurm-exporter']
 
 - name: "Install Prometheus and Grafana on head node"
   hosts: head
