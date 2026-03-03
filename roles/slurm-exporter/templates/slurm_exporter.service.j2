@@ -1,0 +1,14 @@
+[Unit]
+Description=Prometheus SLURM Exporter
+After=network.target slurmctld.service
+
+[Service]
+Type=simple
+User={{ slurm_exporter_user }}
+Group={{ slurm_exporter_group }}
+ExecStart={{ slurm_exporter_binary }} -listen-address=:{{ slurm_exporter_port }}
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

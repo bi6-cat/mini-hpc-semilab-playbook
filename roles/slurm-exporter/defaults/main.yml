@@ -1,0 +1,10 @@
+---
+# Slurm Exporter defaults
+
+slurm_exporter_version: "0.20"
+slurm_exporter_repo: "github.com/vpenso/prometheus-slurm-exporter"
+slurm_exporter_binary: /usr/local/bin/prometheus-slurm-exporter
+slurm_exporter_service_name: slurm_exporter
+slurm_exporter_port: 9341
+slurm_exporter_user: slurm
+slurm_exporter_group: slurm

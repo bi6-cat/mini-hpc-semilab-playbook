@@ -1,0 +1,65 @@
+---
+
+- name: Check if slurm_exporter binary exists
+  ansible.builtin.stat:
+    path: "{{ slurm_exporter_binary }}"
+  register: slurm_exporter_stat
+
+- name: Install Go toolchain for building slurm_exporter
+  ansible.builtin.dnf:
+    name: golang
+    state: present
+  when: not slurm_exporter_stat.stat.exists
+
+- name: Build and install prometheus-slurm-exporter from source
+  ansible.builtin.shell: |
+    export HOME=/root
+    export GOPATH=/root/go
+    rm -rf /tmp/prometheus-slurm-exporter-src
+    git clone --depth=1 --branch {{ slurm_exporter_version }} \
+      https://github.com/vpenso/prometheus-slurm-exporter.git \
+      /tmp/prometheus-slurm-exporter-src
+    cd /tmp/prometheus-slurm-exporter-src
+    go build -o {{ slurm_exporter_binary }} .
+    chmod 0755 {{ slurm_exporter_binary }}
+  args:
+    creates: "{{ slurm_exporter_binary }}"
+  when: not slurm_exporter_stat.stat.exists
+  notify: restart slurm_exporter
+
+- name: Deploy slurm_exporter systemd service
+  ansible.builtin.template:
+    src: slurm_exporter.service.j2
+    dest: /etc/systemd/system/slurm_exporter.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart slurm_exporter
+
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
+- name: Configure firewall for slurm_exporter
+  ansible.posix.firewalld:
+    port: "{{ slurm_exporter_port }}/tcp"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  when:
+    - ansible_facts.services['firewalld.service'] is defined
+    - ansible_facts.services['firewalld.service'].state == 'running'
+  ignore_errors: yes
+
+- name: Enable and start slurm_exporter service
+  ansible.builtin.systemd:
+    name: "{{ slurm_exporter_service_name }}"
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Wait for slurm_exporter port
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ slurm_exporter_port }}"
+    delay: 2
+    timeout: 30
