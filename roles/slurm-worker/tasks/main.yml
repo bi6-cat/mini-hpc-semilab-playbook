@@ -2,6 +2,14 @@
 # Slurm Worker Tasks
 # Setup Slurm worker daemon on compute nodes
 
+- name: "Enable X11Forwarding on compute nodes for Slurm --x11"
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?X11UseLocalhost'
+    line: 'X11UseLocalhost no'
+    state: present
+  notify: Restart sshd
+
 - name: "Install Slurm worker packages"
   dnf:
     name: "{{ slurm_worker_packages }}"

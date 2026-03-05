@@ -1,6 +1,11 @@
 ---
 # Slurm Worker Handlers
 
+- name: Restart sshd
+  ansible.builtin.systemd:
+    name: sshd
+    state: restarted
+
 - name: restart slurmd
   systemd:
     name: slurmd
