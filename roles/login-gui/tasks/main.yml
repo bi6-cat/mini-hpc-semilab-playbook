@@ -5,6 +5,29 @@
       - gui_enabled | default(false) | bool
     fail_msg: "GUI not enabled for this host (set gui_enabled: true)"
 
+- name: Install xauth for X11 forwarding
+  ansible.builtin.dnf:
+    name:
+      - xorg-x11-xauth
+      - xorg-x11-utils
+    state: present
+
+- name: Enable X11 forwarding in sshd
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?X11Forwarding'
+    line: 'X11Forwarding yes'
+    state: present
+  notify: Restart sshd
+
+- name: Disable X11 localhost restriction (allow forwarding to compute nodes)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?X11UseLocalhost'
+    line: 'X11UseLocalhost no'
+    state: present
+  notify: Restart sshd
+
 - name: Install EPEL repository
   ansible.builtin.dnf:
     name: epel-release
