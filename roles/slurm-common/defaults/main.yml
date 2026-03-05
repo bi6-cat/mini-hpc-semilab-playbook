@@ -89,6 +89,9 @@ slurm_compute_nodes:
     memory: "{{ hostvars['compute02']['slurm_real_memory'] | default(4096) }}"
     state: UNKNOWN
 
+# X11 Forwarding
+slurm_x11_enabled: true
+
 # Partitions configuration
 slurm_partitions:
   - name: regular
