@@ -71,13 +71,18 @@ TaskPlugin=task/cgroup
 # MPI
 MpiDefault=none
 
+# X11 FORWARDING
+{% if slurm_x11_enabled | default(true) %}
+PrologFlags=X11
+{% endif %}
+
 # RESOURCE LIMITS (from cgroups)
 JobAcctGatherType=jobacct_gather/cgroup
 JobAcctGatherFrequency=30
 
 # COMPUTE NODES
 {% for node in slurm_compute_nodes %}
-NodeName={{ node }} NodeAddr={{ hostvars[node]['ansible_host'] | default(node) }} CPUs={{ hostvars[node]['slurm_cpu_count'] | default(2) }} RealMemory={{ hostvars[node]['slurm_real_memory'] | default(4096) }} State=UNKNOWN
+NodeName={{ node.name }} NodeAddr={{ node.addr }} CPUs={{ node.cpus }} RealMemory={{ node.memory }} State={{ node.state | default('UNKNOWN') }}
 {% endfor %}
 
 # PARTITIONS
