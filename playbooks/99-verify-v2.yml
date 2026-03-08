@@ -1361,6 +1361,59 @@
       loop: "{{ monitoring_results }}"
 
 
+- name: "VERIFY 06-MONITORING: Node Exporter on cluster nodes"
+  hosts: head,login,compute,storage
+  gather_facts: false
+  become: true
+  tags: ['monitoring', 'node-exporter']
+
+  vars:
+    node_exporter_results: []
+
+  tasks:
+    - name: Initialize node exporter results
+      ansible.builtin.set_fact:
+        node_exporter_results: []
+
+    - block:
+        - name: "[MON-NODE] Check Node Exporter service"
+          ansible.builtin.systemd:
+            name: node_exporter
+          register: node_exporter_status
+          ignore_errors: true
+
+        - name: Record Node Exporter service state
+          ansible.builtin.set_fact:
+            node_exporter_results: "{{ node_exporter_results + [{'check': 'Node Exporter', 'status': 'PASS' if node_exporter_status.status.ActiveState == 'active' else 'INFO', 'value': node_exporter_status.status.ActiveState | default('not-installed')}] }}"
+
+        - name: "[MON-NODE] Check Node Exporter endpoint"
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ node_exporter_port | default(9100) }}/metrics"
+            method: GET
+            status_code: 200
+            return_content: false
+            timeout: 5
+          register: node_exporter_metrics
+          ignore_errors: true
+
+        - name: Record Node Exporter endpoint state
+          ansible.builtin.set_fact:
+            node_exporter_results: "{{ node_exporter_results + [{'check': 'Node Exporter endpoint', 'status': 'PASS' if node_exporter_metrics.status == 200 else 'INFO', 'value': node_exporter_metrics.status | default('unreachable')}] }}"
+      rescue:
+        - name: Record node exporter check error
+          ansible.builtin.set_fact:
+            node_exporter_results: "{{ node_exporter_results + [{'check': 'Node Exporter', 'status': 'INFO', 'msg': 'Cannot verify'}] }}"
+
+    - name: "[MON-NODE] ═══════════════════════════════════════════════════"
+      ansible.builtin.debug:
+        msg: "06-MONITORING NODE STATUS: {{ inventory_hostname }}"
+
+    - name: "[MON-NODE] Show results"
+      ansible.builtin.debug:
+        msg: "  {{ '✓' if item.status == 'PASS' else 'ⓘ' }} {{ item.check }}: {{ item.value | default(item.status) }}"
+      loop: "{{ node_exporter_results }}"
+
+
 ##############################################################################
 # PLAY 14: Final Summary Report
 ##############################################################################
@@ -1425,7 +1478,7 @@
     - name: Save verification timestamp
       ansible.builtin.copy:
         content: |
-          Last verification: {{ ansible_date_time.iso8601 }}
+          Last verification: {{ lookup('pipe', 'date -Iseconds') }}
           Playbook: 99-verify-v2.yml (Improved version)
         dest: /tmp/hpc-last-verify-v2.txt
         mode: '0644'
