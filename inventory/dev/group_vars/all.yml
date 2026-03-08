@@ -18,6 +18,8 @@ os_packages:
   - openssh-clients
   - rsync
   - python3-pexpect
+  - xorg-x11-xauth
+  - xterm
 
 # Network
 dns_servers:
@@ -30,7 +32,7 @@ cluster_network_cidr: 192.168.56.0/24
 # FreeIPA
 freeipa_domain: lab.local
 freeipa_realm: LAB.LOCAL
-freeipa_admin_password: "Admin@1234"
+freeipa_admin_password: "{{ lookup('ansible.builtin.env', 'FREEIPA_ADMIN_PASSWORD') }}"
 freeipa_server: "head01.{{ domain_name }}"
 
 # Storage
@@ -40,11 +42,15 @@ nfs_soft: /soft
 
 # Slurm
 slurm_cluster_name: HPC-LAB
-slurm_state_dir: /var/spool/slurm/ctld 
+slurm_state_dir: /var/spool/slurm/ctld
 slurm_log_dir: /var/log/slurm
 
 # SSH
 ssh_port: 22
+
+# Monitoring
+node_exporter_port: 9100
+slurm_exporter_port: 9341
 
 # User Groups Configuration
 user_groups:

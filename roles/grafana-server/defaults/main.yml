@@ -7,4 +7,4 @@ grafana_port: 3000
 grafana_repo_enabled: true
 grafana_repo_baseurl: https://rpm.grafana.com
 grafana_admin_user: admin
-grafana_admin_password: ""
+grafana_admin_password: "{{ lookup('ansible.builtin.env', 'GRAFANA_ADMIN_PASSWORD') }}"

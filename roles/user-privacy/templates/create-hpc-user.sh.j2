@@ -124,7 +124,7 @@ fi
 echo "Group $GROUP has GID: $GROUP_GID"
 
 # Set default password (user must change on first login)
-DEFAULT_PASSWORD="0000"
+DEFAULT_PASSWORD="{{ hpc_default_user_password }}"
 
 echo "$DEFAULT_PASSWORD" | ipa user-add "$USERNAME" \
   --first="$FIRSTNAME" \
@@ -193,7 +193,7 @@ echo "=========================================="
 echo "User provisioned successfully"
 echo "=========================================="
 echo "Username:       $USERNAME"
-echo "Password:       0000 (default, must change on first login)"
+echo "Password:       $DEFAULT_PASSWORD (default, must change on first login)"
 echo "Home Directory: ${NFS_HOME}/${GROUP}/${USERNAME}"
 echo "Login:          ssh ${USERNAME}@login01"
 if [[ " ${COMPUTE_GROUPS[@]} " =~ " ${GROUP} " ]]; then

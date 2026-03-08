@@ -8,8 +8,8 @@ slurm_dbd_host: "localhost"
 slurm_dbd_port: 6819
 
 # Database (MariaDB)
-mariadb_root_password: "Admin@1234"
-mariadb_slurm_password: "Admin@1234"
+mariadb_root_password: "{{ lookup('ansible.builtin.env', 'MARIADB_ROOT_PASSWORD') }}"
+mariadb_slurm_password: "{{ lookup('ansible.builtin.env', 'MARIADB_SLURM_PASSWORD') }}"
 
 # NFS Server
 nfs_server_enabled: false
