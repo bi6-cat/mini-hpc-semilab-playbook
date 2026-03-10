@@ -1,0 +1,7 @@
+---
+ldap_server_packages:
+  - 389-ds-base
+  - openldap-clients
+
+ldap_server_port: 389
+ldap_server_secure_port: 636

@@ -1,0 +1,5 @@
+---
+- name: Restart LDAP instance
+  ansible.builtin.systemd:
+    name: "dirsrv@{{ ldap_ds_instance }}"
+    state: restarted

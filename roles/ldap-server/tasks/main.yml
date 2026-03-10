@@ -1,6 +1,96 @@
 ---
-- name: Phase 1 placeholder for LDAP server role
+- name: Install LDAP server packages
+  ansible.builtin.dnf:
+    name: "{{ ldap_server_packages }}"
+    state: present
+  retries: 3
+  delay: 5
+
+- name: Check whether LDAP instance already exists
+  ansible.builtin.stat:
+    path: "/etc/dirsrv/slapd-{{ ldap_ds_instance }}"
+  register: ldap_instance_dir
+
+- name: Ensure LDAP bootstrap directory exists
+  ansible.builtin.file:
+    path: /root/.ansible-ldap
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Render dscreate configuration
+  ansible.builtin.template:
+    src: dscreate.inf.j2
+    dest: /root/.ansible-ldap/dscreate.inf
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Create 389-ds instance
+  ansible.builtin.command: dscreate from-file /root/.ansible-ldap/dscreate.inf
+  when: not ldap_instance_dir.stat.exists
+  register: dscreate_result
+
+- name: Ensure LDAP instance service is enabled and running
+  ansible.builtin.systemd:
+    name: "dirsrv@{{ ldap_ds_instance }}"
+    state: started
+    enabled: yes
+
+- name: Wait for LDAP TCP port
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ ldap_server_port }}"
+    timeout: 120
+
+- name: Install OpenSSH LDAP schema for sshPublicKey
+  ansible.builtin.template:
+    src: openssh-lpk.ldif.j2
+    dest: "/etc/dirsrv/slapd-{{ ldap_ds_instance }}/schema/98openssh-lpk.ldif"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart LDAP instance
+
+- name: Render base OUs LDIF
+  ansible.builtin.template:
+    src: base-ous.ldif.j2
+    dest: /root/.ansible-ldap/base-ous.ldif
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Check whether people OU already exists
+  ansible.builtin.command: >
+    ldapsearch -x
+    -H ldap://127.0.0.1
+    -D "{{ ldap_bind_dn }}"
+    -w "{{ ldap_bind_password }}"
+    -b "{{ ldap_user_base }}"
+    -s base
+    "(objectClass=organizationalUnit)"
+    dn
+  register: ldap_people_ou_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Create base LDAP OUs
+  ansible.builtin.command: >
+    ldapadd -x
+    -H ldap://127.0.0.1
+    -D "{{ ldap_bind_dn }}"
+    -w "{{ ldap_bind_password }}"
+    -f /root/.ansible-ldap/base-ous.ldif
+  when: ldap_people_ou_check.rc != 0
+  register: ldap_ou_create
+  changed_when: ldap_ou_create.rc == 0
+  no_log: true
+
+- name: Show LDAP server configuration summary
   ansible.builtin.debug:
     msg:
-      - "LDAP server role scaffold is active."
-      - "Phase 2 will install/configure the real LDAP server and TLS."
+      - "LDAP instance: {{ ldap_ds_instance }}"
+      - "LDAP base DN: {{ ldap_base_dn }}"
+      - "LDAP URI: {{ ldap_uri }}"
