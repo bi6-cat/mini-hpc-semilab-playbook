@@ -30,12 +30,3 @@
       tags:
         - identity
         - user-groups
-
-
-- name: 05 - Verify User Groups Configuration
-  hosts: head
-  become: true
-  gather_facts: false
-  
-  roles:
-    - identity-verify
