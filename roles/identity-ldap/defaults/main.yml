@@ -1,0 +1,8 @@
+---
+ldap_admin_uid: 20000
+ldap_admin_gid: 20000
+ldap_admin_home: "/home/{{ admin_user }}"
+ldap_admin_shell: /bin/bash
+ldap_admin_password: "{{ lookup('ansible.builtin.env', 'HPC_DEFAULT_USER_PASSWORD') }}"
+ldap_local_uri: ldap://127.0.0.1
+sudo_rule_name: hpc-admins

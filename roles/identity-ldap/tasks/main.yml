@@ -1,6 +1,224 @@
 ---
-- name: Phase 1 placeholder for LDAP identity management role
+- name: Ensure LDAP CLI tooling is present
+  ansible.builtin.dnf:
+    name: openldap-clients
+    state: present
+
+- name: Validate LDAP bind password is set
+  ansible.builtin.assert:
+    that:
+      - ldap_bind_password is defined
+      - (ldap_bind_password | length) > 0
+    fail_msg: "LDAP_BIND_PASSWORD is not set. Export it before running playbooks."
+
+- name: Check if admin LDAP group exists
+  ansible.builtin.command: >
+    ldapsearch -x
+    -H {{ ldap_local_uri }}
+    -D "{{ ldap_bind_dn }}"
+    -w "{{ ldap_bind_password }}"
+    -b "cn={{ admin_group }},{{ ldap_group_base }}"
+    -s base
+    "(objectClass=posixGroup)"
+    dn
+  register: ldap_admin_group_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Create admin LDAP group
+  ansible.builtin.shell: |
+    cat <<'LDIF' | ldapadd -x -H {{ ldap_local_uri }} -D "{{ ldap_bind_dn }}" -w "{{ ldap_bind_password }}"
+    dn: cn={{ admin_group }},{{ ldap_group_base }}
+    objectClass: top
+    objectClass: posixGroup
+    cn: {{ admin_group }}
+    gidNumber: {{ ldap_admin_gid }}
+    description: HPC Administrators
+    LDIF
+  when: ldap_admin_group_check.rc != 0
+  register: ldap_admin_group_create
+  changed_when: ldap_admin_group_create.rc == 0
+  no_log: true
+
+- name: Check if admin LDAP user exists
+  ansible.builtin.command: >
+    ldapsearch -x
+    -H {{ ldap_local_uri }}
+    -D "{{ ldap_bind_dn }}"
+    -w "{{ ldap_bind_password }}"
+    -b "uid={{ admin_user }},{{ ldap_user_base }}"
+    -s base
+    "(objectClass=posixAccount)"
+    dn
+  register: ldap_admin_user_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Hash admin user password
+  ansible.builtin.command: slappasswd -s "{{ ldap_admin_password }}"
+  register: ldap_admin_password_hash
+  changed_when: false
+  no_log: true
+
+- name: Create admin LDAP user
+  ansible.builtin.shell: |
+    cat <<'LDIF' | ldapadd -x -H {{ ldap_local_uri }} -D "{{ ldap_bind_dn }}" -w "{{ ldap_bind_password }}"
+    dn: uid={{ admin_user }},{{ ldap_user_base }}
+    objectClass: top
+    objectClass: person
+    objectClass: organizationalPerson
+    objectClass: inetOrgPerson
+    objectClass: posixAccount
+    objectClass: shadowAccount
+    cn: {{ admin_user }}
+    sn: Administrator
+    givenName: HPC
+    uid: {{ admin_user }}
+    uidNumber: {{ ldap_admin_uid }}
+    gidNumber: {{ ldap_admin_gid }}
+    homeDirectory: {{ ldap_admin_home }}
+    loginShell: {{ ldap_admin_shell }}
+    mail: {{ admin_user }}@{{ ldap_domain }}
+    userPassword: {{ ldap_admin_password_hash.stdout }}
+    LDIF
+  when: ldap_admin_user_check.rc != 0
+  register: ldap_admin_user_create
+  changed_when: ldap_admin_user_create.rc == 0
+  no_log: true
+
+- name: Check whether admin user is member of admin group
+  ansible.builtin.command: >
+    ldapsearch -x
+    -H {{ ldap_local_uri }}
+    -D "{{ ldap_bind_dn }}"
+    -w "{{ ldap_bind_password }}"
+    -b "cn={{ admin_group }},{{ ldap_group_base }}"
+    -s base
+    "(memberUid={{ admin_user }})"
+    memberUid
+  register: ldap_admin_member_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Add admin user to admin group
+  ansible.builtin.shell: |
+    cat <<'LDIF' | ldapmodify -x -H {{ ldap_local_uri }} -D "{{ ldap_bind_dn }}" -w "{{ ldap_bind_password }}"
+    dn: cn={{ admin_group }},{{ ldap_group_base }}
+    changetype: modify
+    add: memberUid
+    memberUid: {{ admin_user }}
+    LDIF
+  when: "'memberUid: ' ~ admin_user not in (ldap_admin_member_check.stdout | default(''))"
+  register: ldap_admin_member_add
+  changed_when: ldap_admin_member_add.rc == 0
+  no_log: true
+
+- name: Check user groups from inventory
+  ansible.builtin.command: >
+    ldapsearch -x
+    -H {{ ldap_local_uri }}
+    -D "{{ ldap_bind_dn }}"
+    -w "{{ ldap_bind_password }}"
+    -b "cn={{ item.name }},{{ ldap_group_base }}"
+    -s base
+    "(objectClass=posixGroup)"
+    dn
+  loop: "{{ user_groups | default([]) }}"
+  register: ldap_user_groups_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Create user groups in LDAP
+  ansible.builtin.shell: |
+    cat <<'LDIF' | ldapadd -x -H {{ ldap_local_uri }} -D "{{ ldap_bind_dn }}" -w "{{ ldap_bind_password }}"
+    dn: cn={{ item.item.name }},{{ ldap_group_base }}
+    objectClass: top
+    objectClass: posixGroup
+    cn: {{ item.item.name }}
+    gidNumber: {{ item.item.gid }}
+    description: {{ item.item.description }}
+    LDIF
+  loop: "{{ ldap_user_groups_check.results | default([]) }}"
+  when: item.rc != 0
+  loop_control:
+    label: "{{ item.item.name }}"
+  register: ldap_user_group_create
+  changed_when: ldap_user_group_create.rc == 0
+  no_log: true
+
+- name: Check if LDAP sudo role exists
+  ansible.builtin.command: >
+    ldapsearch -x
+    -H {{ ldap_local_uri }}
+    -D "{{ ldap_bind_dn }}"
+    -w "{{ ldap_bind_password }}"
+    -b "cn={{ sudo_rule_name }},{{ ldap_sudo_base }}"
+    -s base
+    "(objectClass=sudoRole)"
+    dn
+  register: ldap_sudo_role_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Create LDAP sudo role for admin group
+  ansible.builtin.shell: |
+    cat <<'LDIF' | ldapadd -x -H {{ ldap_local_uri }} -D "{{ ldap_bind_dn }}" -w "{{ ldap_bind_password }}"
+    dn: cn={{ sudo_rule_name }},{{ ldap_sudo_base }}
+    objectClass: top
+    objectClass: sudoRole
+    cn: {{ sudo_rule_name }}
+    sudoUser: %{{ admin_group }}
+    sudoHost: ALL
+    sudoCommand: ALL
+    LDIF
+  when: ldap_sudo_role_check.rc != 0
+  register: ldap_sudo_role_create
+  changed_when: ldap_sudo_role_create.rc == 0
+  no_log: true
+
+- name: Deploy /home directory on NFS storage
+  ansible.builtin.file:
+    path: "{{ nfs_home }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  delegate_to: "{{ groups['storage'][0] }}"
+  when: user_groups is defined
+
+- name: Create shared directories in /home
+  ansible.builtin.file:
+    path: "{{ nfs_home }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - tools
+    - software
+    - docs
+  delegate_to: "{{ groups['storage'][0] }}"
+
+- name: Create group home directories on NFS storage
+  ansible.builtin.file:
+    path: "{{ nfs_home }}/{{ item.name }}"
+    state: directory
+    owner: root
+    group: "{{ item.gid }}"
+    mode: '0711'
+  loop: "{{ user_groups }}"
+  when: user_groups is defined
+  delegate_to: "{{ groups['storage'][0] }}"
+
+- name: Display LDAP identity configuration status
   ansible.builtin.debug:
     msg:
-      - "LDAP identity management scaffold is active."
-      - "Phase 3 will create users, groups, sudo rules, and SSH keys in LDAP."
+      - "Admin group: {{ admin_group }}"
+      - "Admin user: {{ admin_user }}"
+      - "Sudo role: {{ sudo_rule_name }}"
+      - "User groups: {{ user_groups | map(attribute='name') | list | join(', ') if user_groups is defined else 'none' }}"
