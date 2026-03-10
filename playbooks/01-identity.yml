@@ -19,7 +19,7 @@
 
   post_tasks:
     - name: LDAP server status
-      ansible.builtin.command: systemctl is-active dirsrv@instance
+      ansible.builtin.command: systemctl is-active dirsrv@{{ ldap_ds_instance }}
       register: ldap_status
       changed_when: false
       failed_when: false
@@ -38,7 +38,7 @@
     - name: Wait for LDAP server
       ansible.builtin.wait_for:
         host: "{{ groups['head'][0] }}.{{ domain_name }}"
-        port: 636
+        port: 389
         timeout: 300
 
   roles:

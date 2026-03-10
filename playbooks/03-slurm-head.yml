@@ -8,7 +8,7 @@
 # 
 # Prerequisites:
 #   - 00-bootstrap.yml (OS setup, users)
-#   - 01-identity.yml (FreeIPA)
+#   - 01-identity.yml (LDAP)
 #   - 02-storage.yml (NFS)
 
 - name: "Install Slurm Controller on Head Node"
