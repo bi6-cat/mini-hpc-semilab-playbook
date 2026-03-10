@@ -1,7 +1,7 @@
 slurm_node_type: login
 
-# FreeIPA Client
-freeipa_setup: client
+# LDAP Client
+ldap_setup: client
 
 # GUI Components
 gui_enabled: true

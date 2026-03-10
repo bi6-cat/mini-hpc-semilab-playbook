@@ -4,8 +4,8 @@ domain_name: lab.local
 timezone: Asia/Ho_Chi_Minh
 
 # Admin
-admin_user: ipaadmin
-admin_group: ipaadmins
+admin_user: ldapadmin
+admin_group: ldapadmins
 
 # OS Configuration
 os_packages:
@@ -29,10 +29,26 @@ dns_servers:
 # Cluster network (used for NFS exports, etc.)
 cluster_network_cidr: 192.168.56.0/24
 
-# FreeIPA
-freeipa_domain: lab.local
-freeipa_realm: LAB.LOCAL
-freeipa_admin_password: "{{ lookup('ansible.builtin.env', 'FREEIPA_ADMIN_PASSWORD') }}"
+# Identity backend (hard switch for new environment)
+identity_backend: ldap
+
+# LDAP
+ldap_domain: "{{ domain_name }}"
+ldap_base_dn: "dc=lab,dc=local"
+ldap_uri: "ldaps://head01.{{ domain_name }}"
+ldap_bind_dn: "cn=admin,{{ ldap_base_dn }}"
+ldap_bind_password: "{{ lookup('ansible.builtin.env', 'LDAP_BIND_PASSWORD') }}"
+ldap_user_base: "ou=people,{{ ldap_base_dn }}"
+ldap_group_base: "ou=groups,{{ ldap_base_dn }}"
+ldap_sudo_base: "ou=sudoers,{{ ldap_base_dn }}"
+ldap_tls_cacert: /etc/openldap/certs/ca.crt
+
+# LDAP SSH public key mapping
+ldap_ssh_public_key_attr: sshPublicKey
+
+# Legacy variables kept for backward compatibility in templates not yet migrated.
+freeipa_domain: "{{ ldap_domain }}"
+freeipa_admin_password: "{{ ldap_bind_password }}"
 freeipa_server: "head01.{{ domain_name }}"
 
 # Storage

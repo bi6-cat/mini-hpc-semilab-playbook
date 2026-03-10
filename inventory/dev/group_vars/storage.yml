@@ -31,5 +31,5 @@ quota_group_limits:
 # Optional: per-user override (nếu cần)
 quota_user_limits: []
 
-# FreeIPA Client
-freeipa_setup: client
+# LDAP Client
+ldap_setup: client
