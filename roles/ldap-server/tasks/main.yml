@@ -1,0 +1,6 @@
+---
+- name: Phase 1 placeholder for LDAP server role
+  ansible.builtin.debug:
+    msg:
+      - "LDAP server role scaffold is active."
+      - "Phase 2 will install/configure the real LDAP server and TLS."

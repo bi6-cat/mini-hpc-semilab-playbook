@@ -1,0 +1,6 @@
+---
+- name: Phase 1 placeholder for LDAP identity verification
+  ansible.builtin.debug:
+    msg:
+      - "LDAP verify scaffold is active."
+      - "Phase 4 will add LDAP/SSSD/SSH key verification checks."

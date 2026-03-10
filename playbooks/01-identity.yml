@@ -1,4 +1,4 @@
-- name: 01 - Setup FreeIPA Server
+- name: 01 - Setup LDAP Server
   hosts: head
   gather_facts: true
   become: true
@@ -13,52 +13,47 @@
       changed_when: false
 
   roles:
-    - freeipa-server
-    - identity
+    - ldap-server
+    - identity-ldap
     - user-privacy
 
   post_tasks:
-    - name: FreeIPA server status
-      ansible.builtin.command: ipactl status
-      register: ipa_status
+    - name: LDAP server status
+      ansible.builtin.command: systemctl is-active dirsrv@instance
+      register: ldap_status
       changed_when: false
       failed_when: false
 
-    - name: Display IPA status
+    - name: Display LDAP status
       ansible.builtin.debug:
-        var: ipa_status.stdout_lines
+        msg: "LDAP service state: {{ ldap_status.stdout | default('unknown') }}"
 
-- name: 01 - Setup FreeIPA Clients
+- name: 01 - Setup LDAP Clients
   hosts: storage,login,compute
   gather_facts: true
   become: true
   serial: 1
 
   pre_tasks:
-    - name: Wait for FreeIPA server
+    - name: Wait for LDAP server
       ansible.builtin.wait_for:
-        host: "{{ freeipa_server }}"
-        port: 443
+        host: "{{ groups['head'][0] }}.{{ domain_name }}"
+        port: 636
         timeout: 300
 
   roles:
-    - freeipa-client
+    - ldap-client
     - user-privacy
 
   post_tasks:
-    - name: Verify IPA enrollment
-      ansible.builtin.command: ipa-client-install --version
-      register: ipa_client_version
-      changed_when: false
-
-    - name: Test SSSD authentication
+    - name: Verify SSSD can resolve admin user
       ansible.builtin.command: id {{ admin_user }}
-      register: sssd_test
+      register: ldap_sssd_test
       changed_when: false
       failed_when: false
 
-    - name: Enrollment status
+    - name: LDAP client status
       ansible.builtin.debug:
         msg:
-          - "-- {{ inventory_hostname }} enrolled to FreeIPA"
-          - "-- SSSD: {{ 'OK' if sssd_test.rc == 0 else 'Pending' }}"
+          - "-- {{ inventory_hostname }} configured for LDAP"
+          - "-- SSSD: {{ 'OK' if ldap_sssd_test.rc == 0 else 'Pending' }}"

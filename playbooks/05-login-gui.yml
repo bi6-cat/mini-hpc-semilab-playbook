@@ -20,13 +20,13 @@
     - login-gui
 
 
-- name: 05 - Configure User Groups on FreeIPA
+- name: 05 - Configure User Groups on LDAP
   hosts: head
   become: true
   gather_facts: true
   
   roles:
-    - role: identity
+    - role: identity-ldap
       tags:
         - identity
         - user-groups
@@ -38,4 +38,4 @@
   gather_facts: false
   
   roles:
-    - ipa-verify
+    - identity-verify
