@@ -1,6 +1,78 @@
 ---
-- name: Phase 1 placeholder for LDAP client role
+- name: Install LDAP client packages
+  ansible.builtin.dnf:
+    name: "{{ ldap_client_packages }}"
+    state: present
+  retries: 3
+  delay: 5
+
+- name: Ensure LDAP server is resolvable
+  ansible.builtin.command: getent hosts "{{ groups['head'][0] }}.{{ domain_name }}"
+  register: ldap_head_dns
+  changed_when: false
+  failed_when: ldap_head_dns.rc != 0
+
+- name: Deploy SSSD LDAP configuration
+  ansible.builtin.template:
+    src: sssd.conf.j2
+    dest: /etc/sssd/sssd.conf
+    owner: root
+    group: root
+    mode: '0600'
+  notify: Restart sssd
+
+- name: Check authselect current profile
+  ansible.builtin.command: authselect current
+  register: authselect_current
+  changed_when: false
+  failed_when: false
+
+- name: Configure authselect for SSSD + mkhomedir
+  ansible.builtin.command: authselect select sssd with-mkhomedir --force
+  when: authselect_current.rc != 0 or 'with-mkhomedir' not in authselect_current.stdout
+  register: authselect_result
+  changed_when: true
+  failed_when: authselect_result.rc != 0
+
+- name: Ensure sudo uses SSSD
+  ansible.builtin.lineinfile:
+    path: /etc/nsswitch.conf
+    regexp: '^sudoers:'
+    line: 'sudoers: files sss'
+
+- name: Configure SSH to fetch authorized keys from SSSD
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?\s*{{ item.key }}\s+'
+    line: '{{ item.key }} {{ item.value }}'
+    state: present
+  loop:
+    - { key: 'AuthorizedKeysCommand', value: '/usr/bin/sss_ssh_authorizedkeys' }
+    - { key: 'AuthorizedKeysCommandUser', value: 'nobody' }
+    - { key: 'PubkeyAuthentication', value: 'yes' }
+    - { key: 'UsePAM', value: 'yes' }
+  notify: Restart sshd
+
+- name: Enable and start oddjobd
+  ansible.builtin.systemd:
+    name: oddjobd
+    state: started
+    enabled: yes
+
+- name: Enable and start SSSD
+  ansible.builtin.systemd:
+    name: sssd
+    state: started
+    enabled: yes
+
+- name: Clear SSSD cache
+  ansible.builtin.command: sss_cache -E
+  changed_when: false
+  failed_when: false
+
+- name: Show LDAP client configuration summary
   ansible.builtin.debug:
     msg:
-      - "LDAP client role scaffold is active on {{ inventory_hostname }}."
-      - "Phase 2 will configure SSSD/PAM/SSH for LDAP-only auth."
+      - "LDAP client configured on {{ inventory_hostname }}"
+      - "SSSD LDAP URI: {{ ldap_uri }}"
+      - "SSH key source: {{ ldap_ssh_public_key_attr }} via sss_ssh_authorizedkeys"

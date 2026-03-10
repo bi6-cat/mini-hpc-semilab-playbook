@@ -1,0 +1,48 @@
+[sssd]
+services = nss, pam, sudo, ssh
+config_file_version = 2
+domains = LDAP
+
+[domain/LDAP]
+id_provider = ldap
+auth_provider = ldap
+chpass_provider = ldap
+sudo_provider = ldap
+cache_credentials = True
+enumerate = False
+access_provider = permit
+
+ldap_uri = {{ ldap_uri }}
+ldap_search_base = {{ ldap_base_dn }}
+ldap_user_search_base = {{ ldap_user_base }}
+ldap_group_search_base = {{ ldap_group_base }}
+ldap_sudo_search_base = {{ ldap_sudo_base }}
+ldap_schema = rfc2307bis
+
+ldap_default_bind_dn = {{ ldap_bind_dn }}
+ldap_default_authtok_type = password
+ldap_default_authtok = {{ ldap_bind_password }}
+
+ldap_id_use_start_tls = False
+ldap_tls_reqcert = never
+
+ldap_user_object_class = posixAccount
+ldap_group_object_class = posixGroup
+ldap_user_name = uid
+ldap_user_uid_number = uidNumber
+ldap_user_gid_number = gidNumber
+ldap_user_home_directory = homeDirectory
+ldap_user_shell = loginShell
+ldap_user_ssh_public_key = {{ ldap_ssh_public_key_attr }}
+
+override_homedir = /home/%u
+
+[nss]
+homedir_substring = /home
+
+[pam]
+offline_credentials_expiration = 2
+
+[sudo]
+
+[ssh]
