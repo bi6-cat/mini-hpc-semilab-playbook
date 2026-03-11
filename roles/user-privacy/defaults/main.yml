@@ -7,3 +7,7 @@ hpc_default_user_password: "{{ lookup('ansible.builtin.env', 'HPC_DEFAULT_USER_P
 
 # Home directory permissions
 home_dir_mode: "0700"
+
+# SSH settings used by create/delete helper scripts
+storage_ssh_user: hpcadmin
+storage_ssh_key: /home/hpcadmin/.ssh/id_ed25519

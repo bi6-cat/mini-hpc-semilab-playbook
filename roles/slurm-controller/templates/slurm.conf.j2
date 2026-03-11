@@ -81,9 +81,15 @@ JobAcctGatherType=jobacct_gather/cgroup
 JobAcctGatherFrequency=30
 
 # COMPUTE NODES
+{% if (slurm_compute_nodes | default([]) | length) > 0 %}
 {% for node in slurm_compute_nodes %}
 NodeName={{ node.name }} NodeAddr={{ node.addr }} CPUs={{ node.cpus }} RealMemory={{ node.memory }} State={{ node.state | default('UNKNOWN') }}
 {% endfor %}
+{% else %}
+{% for node_name in groups['compute'] | default([]) %}
+NodeName={{ node_name }} NodeAddr={{ hostvars[node_name]['ansible_host'] | default(node_name) }} CPUs={{ hostvars[node_name]['slurm_cpu_count'] | default(2) }} RealMemory={{ hostvars[node_name]['slurm_real_memory'] | default(4096) }} State=UNKNOWN
+{% endfor %}
+{% endif %}
 
 # PARTITIONS
 {% for partition in slurm_partitions %}

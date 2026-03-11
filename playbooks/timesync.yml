@@ -1,10 +1,10 @@
 ---
 # Đồng bộ time toàn cụm
-# - head01 đồng bộ với upstream NTP qua IP (bỏ qua DNS)
-# - Các node còn lại dùng head01 làm NTP server nội bộ
+# - Head node đồng bộ với upstream NTP qua IP (bỏ qua DNS)
+# - Các node còn lại dùng head node làm NTP server nội bộ
 
-# ─── BƯỚC 1: Cấu hình head01 làm NTP server nội bộ ───────────────────────────
-- name: "Timesync | Configure head01 as cluster NTP server"
+# ─── BƯỚC 1: Cấu hình head node làm NTP server nội bộ ────────────────────────
+- name: "Timesync | Configure head node as cluster NTP server"
   hosts: head
   become: true
   gather_facts: false
@@ -15,7 +15,7 @@
       - 216.239.35.0    # time.google.com
       - 216.239.35.4    # time.google.com
       - 162.159.200.1   # time.cloudflare.com
-    cluster_network: "{{ cluster_network_cidr | default('192.168.56.0/24') }}"
+    cluster_network: "{{ cluster_network_cidr }}"
 
   tasks:
     - name: Ensure chrony is installed
@@ -70,22 +70,22 @@
         immediate: true
       ignore_errors: true
 
-    - name: Force immediate time step on head01
+    - name: Force immediate time step on head node
       ansible.builtin.command: chronyc makestep
       changed_when: true
 
-    - name: Wait for head01 to sync (up to 30 s)
+    - name: Wait for head node to sync (up to 30 s)
       ansible.builtin.command: chronyc waitsync 6 0.1
       register: waitsync_result
       failed_when: waitsync_result.rc not in [0, 1]
       changed_when: false
 
-    - name: Show tracking on head01
+    - name: Show tracking on head node
       ansible.builtin.command: chronyc tracking
       register: head_tracking
       changed_when: false
 
-    - name: Print head01 tracking
+    - name: Print head node tracking
       ansible.builtin.debug:
         var: head_tracking.stdout_lines
 
@@ -95,14 +95,15 @@
         name: chronyd
         state: restarted
 
-# ─── BƯỚC 2: Cấu hình các node còn lại dùng head01 ───────────────────────────
-- name: "Timesync | Configure worker nodes to use head01 as NTP server"
+# ─── BƯỚC 2: Cấu hình các node còn lại dùng head node ────────────────────────
+- name: "Timesync | Configure worker nodes to use head node as NTP server"
   hosts: compute,login,storage
   become: true
   gather_facts: false
 
   vars:
-    head_ip: "{{ hostvars['head01']['ansible_host'] | default('192.168.56.10') }}"
+    head_host: "{{ (groups['head'] | first) }}"
+    head_ip: "{{ hostvars[head_host]['ansible_host'] | default(head_host) }}"
 
   tasks:
     - name: Ensure chrony is installed
@@ -110,7 +111,7 @@
         name: chrony
         state: present
 
-    - name: Build chrony.conf pointing to head01
+    - name: Build chrony.conf pointing to head node
       ansible.builtin.copy:
         dest: /etc/chrony.conf
         owner: root
@@ -118,7 +119,7 @@
         mode: '0644'
         content: |
           # === Managed by Ansible – timesync.yml ===
-          # NTP server = head01 (internal cluster)
+          # NTP server = head node (internal cluster)
           server {{ head_ip }} iburst prefer
 
           # Drift file
@@ -144,7 +145,7 @@
       ansible.builtin.command: chronyc makestep
       changed_when: true
 
-    - name: Wait for node to sync with head01 (up to 30 s)
+    - name: Wait for node to sync with head node (up to 30 s)
       ansible.builtin.command: chronyc waitsync 6 0.1
       register: waitsync_result
       failed_when: waitsync_result.rc not in [0, 1]

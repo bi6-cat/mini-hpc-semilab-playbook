@@ -11,6 +11,17 @@
     name: epel-release
     state: present
 
+- name: "Install DNF plugins"
+  dnf:
+    name: dnf-plugins-core
+    state: present
+
+- name: "Enable PowerTools/CRB repository for Slurm dependencies"
+  shell: |
+    dnf config-manager --set-enabled powertools || dnf config-manager --set-enabled crb
+  register: slurm_repo_enable
+  changed_when: "'enabled' in (slurm_repo_enable.stdout | lower) or 'enabled' in (slurm_repo_enable.stderr | lower)"
+
 - name: "Install development tools"
   dnf:
     name: "@Development Tools"
@@ -21,6 +32,11 @@
     name:
       - munge
       - munge-libs
+    state: present
+
+- name: "Install Slurm client packages"
+  dnf:
+    name: "{{ slurm_client_packages }}"
     state: present
 
 - name: "Create Slurm group"

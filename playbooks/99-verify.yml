@@ -1,0 +1,258 @@
+---
+- name: 99 - Verify 00 Bootstrap on all nodes
+  hosts: all
+  gather_facts: true
+  become: true
+  vars:
+    expected_selinux_state: "{{ selinux_state | default('permissive') }}"
+
+  tasks:
+    - name: Verify OS is Rocky Linux 8
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Rocky"
+          - ansible_distribution_major_version == "8"
+        fail_msg: "Host {{ inventory_hostname }} is not Rocky Linux 8"
+
+    - name: Verify FQDN hostname matches inventory and domain
+      ansible.builtin.command: hostname -f
+      register: verify_fqdn
+      changed_when: false
+
+    - name: Assert FQDN is correct
+      ansible.builtin.assert:
+        that:
+          - verify_fqdn.stdout == inventory_hostname + '.' + domain_name
+        fail_msg: "Expected {{ inventory_hostname }}.{{ domain_name }}, got {{ verify_fqdn.stdout }}"
+
+    - name: Verify timezone
+      ansible.builtin.command: timedatectl show --property=Timezone --value
+      register: verify_timezone
+      changed_when: false
+
+    - name: Assert timezone is configured
+      ansible.builtin.assert:
+        that:
+          - verify_timezone.stdout == timezone
+        fail_msg: "Expected timezone {{ timezone }}, got {{ verify_timezone.stdout }}"
+
+    - name: Verify ansible user exists
+      ansible.builtin.command: id ansible
+      register: verify_ansible_user
+      changed_when: false
+      failed_when: verify_ansible_user.rc != 0
+
+    - name: Verify ansible sudoers file exists
+      ansible.builtin.stat:
+        path: /etc/sudoers.d/ansible
+      register: verify_ansible_sudoers
+
+    - name: Assert ansible sudoers file mode and presence
+      ansible.builtin.assert:
+        that:
+          - verify_ansible_sudoers.stat.exists
+          - verify_ansible_sudoers.stat.mode == '0440'
+        fail_msg: "/etc/sudoers.d/ansible is missing or mode is not 0440"
+
+    - name: Verify SELinux mode
+      ansible.builtin.command: getenforce
+      register: verify_selinux
+      changed_when: false
+
+    - name: Assert SELinux mode follows policy
+      ansible.builtin.assert:
+        that:
+          - verify_selinux.stdout | lower == expected_selinux_state | lower
+        fail_msg: "Expected SELinux {{ expected_selinux_state }}, got {{ verify_selinux.stdout }}"
+
+    - name: Verify chronyd service is active
+      ansible.builtin.command: systemctl is-active chronyd
+      register: verify_chronyd_active
+      changed_when: false
+      failed_when: verify_chronyd_active.stdout != 'active'
+
+    - name: Verify chronyd service is enabled
+      ansible.builtin.command: systemctl is-enabled chronyd
+      register: verify_chronyd_enabled
+      changed_when: false
+      failed_when: verify_chronyd_enabled.stdout != 'enabled'
+
+    - name: Verify key bootstrap packages are installed
+      ansible.builtin.command: rpm -q epel-release python3-pip
+      register: verify_bootstrap_pkgs
+      changed_when: false
+      failed_when: verify_bootstrap_pkgs.rc != 0
+
+
+- name: 99 - Verify 01 Identity LDAP server on head
+  hosts: head
+  gather_facts: false
+  become: true
+  vars:
+    expected_ldap_ds_instance: "{{ ldap_ds_instance | default('hpc') }}"
+    expected_ldap_server_port: "{{ ldap_server_port | default(389) }}"
+    expected_sudo_rule_name: "{{ sudo_rule_name | default('hpc-admins') }}"
+
+  tasks:
+    - name: Verify LDAP server package is installed
+      ansible.builtin.command: rpm -q 389-ds-base
+      register: verify_ldap_pkg
+      changed_when: false
+      failed_when: verify_ldap_pkg.rc != 0
+
+    - name: Verify LDAP service is active
+      ansible.builtin.command: systemctl is-active dirsrv@{{ expected_ldap_ds_instance }}
+      register: verify_ldap_service_active
+      changed_when: false
+      failed_when: verify_ldap_service_active.stdout != 'active'
+
+    - name: Verify LDAP service is enabled
+      ansible.builtin.command: systemctl is-enabled dirsrv@{{ expected_ldap_ds_instance }}
+      register: verify_ldap_service_enabled
+      changed_when: false
+      failed_when: verify_ldap_service_enabled.stdout != 'enabled'
+
+    - name: Verify LDAP port is listening locally
+      ansible.builtin.command: ss -lnt '( sport = :{{ expected_ldap_server_port }} )'
+      register: verify_ldap_port
+      changed_when: false
+      failed_when: verify_ldap_port.rc != 0 or (verify_ldap_port.stdout_lines | length) < 2
+
+    - name: Verify OU people exists
+      ansible.builtin.command: >
+        ldapsearch -x
+        -H ldap://127.0.0.1
+        -D "{{ ldap_bind_dn }}"
+        -w "{{ ldap_bind_password }}"
+        -b "{{ ldap_user_base }}"
+        -s base
+        "(objectClass=organizationalUnit)"
+        dn
+      register: verify_ou_people
+      changed_when: false
+      failed_when: verify_ou_people.rc != 0
+      no_log: true
+
+    - name: Verify OU groups exists
+      ansible.builtin.command: >
+        ldapsearch -x
+        -H ldap://127.0.0.1
+        -D "{{ ldap_bind_dn }}"
+        -w "{{ ldap_bind_password }}"
+        -b "{{ ldap_group_base }}"
+        -s base
+        "(objectClass=organizationalUnit)"
+        dn
+      register: verify_ou_groups
+      changed_when: false
+      failed_when: verify_ou_groups.rc != 0
+      no_log: true
+
+    - name: Verify OU sudoers exists
+      ansible.builtin.command: >
+        ldapsearch -x
+        -H ldap://127.0.0.1
+        -D "{{ ldap_bind_dn }}"
+        -w "{{ ldap_bind_password }}"
+        -b "{{ ldap_sudo_base }}"
+        -s base
+        "(objectClass=organizationalUnit)"
+        dn
+      register: verify_ou_sudo
+      changed_when: false
+      failed_when: verify_ou_sudo.rc != 0
+      no_log: true
+
+    - name: Verify admin LDAP group exists
+      ansible.builtin.command: >
+        ldapsearch -x
+        -H ldap://127.0.0.1
+        -D "{{ ldap_bind_dn }}"
+        -w "{{ ldap_bind_password }}"
+        -b "cn={{ admin_group }},{{ ldap_group_base }}"
+        -s base
+        "(objectClass=posixGroup)"
+        dn
+      register: verify_admin_group
+      changed_when: false
+      failed_when: verify_admin_group.rc != 0
+      no_log: true
+
+    - name: Verify admin LDAP user exists
+      ansible.builtin.command: >
+        ldapsearch -x
+        -H ldap://127.0.0.1
+        -D "{{ ldap_bind_dn }}"
+        -w "{{ ldap_bind_password }}"
+        -b "uid={{ admin_user }},{{ ldap_user_base }}"
+        -s base
+        "(objectClass=posixAccount)"
+        dn
+      register: verify_admin_user
+      changed_when: false
+      failed_when: verify_admin_user.rc != 0
+      no_log: true
+
+    - name: Verify LDAP sudo role exists
+      ansible.builtin.command: >
+        ldapsearch -x
+        -H ldap://127.0.0.1
+        -D "{{ ldap_bind_dn }}"
+        -w "{{ ldap_bind_password }}"
+        -b "cn={{ expected_sudo_rule_name }},{{ ldap_sudo_base }}"
+        -s base
+        "(objectClass=sudoRole)"
+        dn
+      register: verify_sudo_role
+      changed_when: false
+      failed_when: verify_sudo_role.rc != 0
+      no_log: true
+
+
+- name: 99 - Verify 01 Identity LDAP clients
+  hosts: storage,login,compute
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Verify SSSD package set is installed
+      ansible.builtin.command: rpm -q sssd sssd-ldap sssd-tools oddjob oddjob-mkhomedir
+      register: verify_sssd_pkgs
+      changed_when: false
+      failed_when: verify_sssd_pkgs.rc != 0
+
+    - name: Verify SSSD service is active
+      ansible.builtin.command: systemctl is-active sssd
+      register: verify_sssd_active
+      changed_when: false
+      failed_when: verify_sssd_active.stdout != 'active'
+
+    - name: Verify SSSD service is enabled
+      ansible.builtin.command: systemctl is-enabled sssd
+      register: verify_sssd_enabled
+      changed_when: false
+      failed_when: verify_sssd_enabled.stdout != 'enabled'
+
+    - name: Verify authselect profile includes sssd and with-mkhomedir
+      ansible.builtin.command: authselect current
+      register: verify_authselect
+      changed_when: false
+      failed_when: verify_authselect.rc != 0 or ('sssd' not in verify_authselect.stdout) or ('with-mkhomedir' not in verify_authselect.stdout)
+
+    - name: Verify LDAP admin account resolves through NSS/SSSD
+      ansible.builtin.command: id {{ admin_user }}
+      register: verify_id_admin
+      changed_when: false
+      failed_when: verify_id_admin.rc != 0
+
+    - name: Verify SSH authorized keys command is configured
+      ansible.builtin.command: grep -E '^(AuthorizedKeysCommand|AuthorizedKeysCommandUser)\s+' /etc/ssh/sshd_config
+      register: verify_ssh_keys_cmd
+      changed_when: false
+      failed_when: verify_ssh_keys_cmd.rc != 0
+
+    - name: Verify sudoers NSS order includes SSSD
+      ansible.builtin.command: grep '^sudoers:\s*files\s*sss' /etc/nsswitch.conf
+      register: verify_sudoers_nss
+      changed_when: false
+      failed_when: verify_sudoers_nss.rc != 0

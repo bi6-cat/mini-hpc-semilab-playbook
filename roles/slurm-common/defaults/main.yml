@@ -4,6 +4,8 @@
 
 # Slurm version and packages
 slurm_version: "23.02"
+slurm_client_packages:
+  - slurm
 slurm_packages:
   - munge
   - munge-libs
@@ -34,8 +36,8 @@ slurm_run_dir: /var/run/slurm
 # slurm_cluster_name: HPC-LAB
 
 # Controller configuration
-slurm_control_machine: head01
-slurm_control_addr: "{{ hostvars['head01']['ansible_host'] }}"
+slurm_control_machine: "{{ (groups['head'] | default([]) | first) | default('head01') }}"
+slurm_control_addr: "{{ hostvars[slurm_control_machine]['ansible_host'] | default(slurm_control_machine) }}"
 
 # Authentication
 slurm_auth_type: auth/munge
@@ -77,23 +79,14 @@ slurm_max_job_count: 10000
 slurm_max_array_size: 1000
 
 # Compute nodes configuration
-slurm_compute_nodes:
-  - name: compute01
-    addr: "{{ hostvars['compute01']['ansible_host'] }}"
-    cpus: "{{ hostvars['compute01']['slurm_cpu_count'] | default(2) }}"
-    memory: "{{ hostvars['compute01']['slurm_real_memory'] | default(4096) }}"
-    state: UNKNOWN
-  - name: compute02
-    addr: "{{ hostvars['compute02']['ansible_host'] }}"
-    cpus: "{{ hostvars['compute02']['slurm_cpu_count'] | default(2) }}"
-    memory: "{{ hostvars['compute02']['slurm_real_memory'] | default(4096) }}"
-    state: UNKNOWN
+# Optional explicit compute node override. Leave empty to auto-discover from inventory group "compute".
+slurm_compute_nodes: []
 
 # Partitions configuration
 slurm_partitions:
   - name: regular
-    nodes: "compute[01-02]"
+    nodes: "{{ groups['compute'] | default([]) | join(',') }}"
     default: "YES"
     max_time: "INFINITE"
     state: UP
-    max_nodes: 2
+    max_nodes: "{{ groups['compute'] | default([]) | length }}"
