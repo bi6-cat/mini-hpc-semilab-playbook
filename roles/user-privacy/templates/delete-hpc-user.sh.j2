@@ -2,7 +2,7 @@
 # User deletion script for HPC cluster
 # Removes LDAP account, NFS home directory, and blacklists username
 
-set -e
+set -euo pipefail
 
 DOMAIN="{{ ldap_domain }}"
 LDAP_URI="{{ ldap_uri }}"
@@ -12,8 +12,8 @@ LDAP_USER_BASE="{{ ldap_user_base }}"
 LDAP_GROUP_BASE="{{ ldap_group_base }}"
 NFS_HOME="{{ nfs_home }}"
 STORAGE_NODE="{{ groups['storage'][0] }}"
-STORAGE_USER="hpcadmin"   # SSH user with key-based auth to storage
-STORAGE_KEY="/home/hpcadmin/.ssh/id_ed25519"  # explicit key (script may run as root)
+STORAGE_USER="{{ storage_ssh_user }}"   # SSH user with key-based auth to storage
+STORAGE_KEY="{{ storage_ssh_key }}"  # explicit key (script may run as root)
 SSH_CMD="ssh -o StrictHostKeyChecking=no -o BatchMode=yes -i $STORAGE_KEY"
 
 usage() {
@@ -40,11 +40,31 @@ if [ $# -lt 1 ]; then
     usage
 fi
 
-USERNAME=$1
 FORCE=false
+USERNAME=""
+for arg in "$@"; do
+    case "$arg" in
+        --force)
+            FORCE=true
+            ;;
+        *)
+            if [ -z "$USERNAME" ]; then
+                USERNAME="$arg"
+            else
+                echo "Error: unexpected argument '$arg'"
+                usage
+            fi
+            ;;
+    esac
+done
 
-if [ "$2" == "--force" ]; then
-    FORCE=true
+if [ -z "$USERNAME" ]; then
+    usage
+fi
+
+if [[ ! "$USERNAME" =~ ^[a-z][a-z0-9_]{2,31}$ ]]; then
+    echo "Error: invalid username '$USERNAME'"
+    exit 1
 fi
 
 # Verify user exists

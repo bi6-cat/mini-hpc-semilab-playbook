@@ -2,7 +2,7 @@
 # User provisioning script for HPC cluster
 # Creates LDAP user with group-based home directory on NFS
 
-set -e
+set -euo pipefail
 
 DOMAIN="{{ ldap_domain }}"
 LDAP_URI="{{ ldap_uri }}"
@@ -12,9 +12,16 @@ LDAP_USER_BASE="{{ ldap_user_base }}"
 LDAP_GROUP_BASE="{{ ldap_group_base }}"
 NFS_HOME="{{ nfs_home }}"
 STORAGE_NODE="{{ groups['storage'][0] }}"
-STORAGE_USER="hpcadmin"   # SSH user with key-based auth to storage
-STORAGE_KEY="/home/hpcadmin/.ssh/id_ed25519"  # explicit key (script may run as root)
+STORAGE_USER="{{ storage_ssh_user }}"   # SSH user with key-based auth to storage
+STORAGE_KEY="{{ storage_ssh_key }}"  # explicit key 
 SSH_CMD="ssh -o StrictHostKeyChecking=no -o BatchMode=yes -i $STORAGE_KEY"
+
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || {
+        echo "Error: required command not found: $1"
+        exit 1
+    }
+}
 
 usage() {
     cat << EOF
@@ -48,6 +55,29 @@ USERNAME=$1
 FIRSTNAME=$2
 LASTNAME=$3
 GROUP=$4
+
+if [[ ! "$USERNAME" =~ ^[a-z][a-z0-9_]{2,31}$ ]]; then
+    echo "Error: invalid username '$USERNAME' (expected: lowercase letters/numbers/underscore, 3-32 chars, starts with letter)"
+    exit 1
+fi
+
+if [[ ! "$FIRSTNAME" =~ ^[A-Za-z][A-Za-z\ -]{0,63}$ ]]; then
+    echo "Error: invalid firstname '$FIRSTNAME'"
+    exit 1
+fi
+
+if [[ ! "$LASTNAME" =~ ^[A-Za-z][A-Za-z\ -]{0,63}$ ]]; then
+    echo "Error: invalid lastname '$LASTNAME'"
+    exit 1
+fi
+
+require_cmd ldapsearch
+require_cmd ldapadd
+require_cmd ldapmodify
+require_cmd pwdhash
+require_cmd awk
+require_cmd sort
+require_cmd tail
 
 # Validate group membership
 VALID_GROUPS=({% for group in user_groups %}"{{ group.name }}" {% endfor %})
@@ -158,6 +188,10 @@ mail: ${USERNAME}@${DOMAIN}
 userPassword: ${PASSWORD_HASH}
 EOF
 
+rollback_ldap_user() {
+    ldapdelete -x -H "$LDAP_URI" -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" "uid=${USERNAME},${LDAP_USER_BASE}" >/dev/null 2>&1 || true
+}
+
 # Add to group (now as primary group member)
 echo "Adding to group $GROUP..."
 cat <<EOF | ldapmodify -x -H "$LDAP_URI" -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" >/dev/null 2>&1 || true
@@ -182,11 +216,13 @@ if [[ " ${COMPUTE_GROUPS[@]} " =~ " ${GROUP} " ]]; then
             echo "Run manually on head node:"
             echo "  sudo sacctmgr -i add user $USERNAME Account=$GROUP Cluster=$SLURM_CLUSTER"
             echo "  sudo sacctmgr -i modify user where name=$USERNAME set DefaultAccount=$GROUP"
+            rollback_ldap_user
             exit 1
         fi
     else
-        echo "Error: sacctmgr not found on this host. Run manually on head01:"
+        echo "Error: sacctmgr not found on this host. Run manually on {{ groups['head'][0] }}:"
         echo "  sudo sacctmgr -i add user $USERNAME Account=$GROUP Cluster=$SLURM_CLUSTER"
+        rollback_ldap_user
         exit 1
     fi
 else
@@ -212,6 +248,12 @@ $SSH_CMD "$STORAGE_USER@$STORAGE_NODE" << EOSSH
     sudo -n ls -ld "${NFS_HOME}/${GROUP}/${USERNAME}"
 EOSSH
 
+if [ $? -ne 0 ]; then
+    echo "Error: failed to create home directory on storage, rolling back LDAP user"
+    rollback_ldap_user
+    exit 1
+fi
+
 echo ""
 echo "=========================================="
 echo "User provisioned successfully"
@@ -219,7 +261,7 @@ echo "=========================================="
 echo "Username:       $USERNAME"
 echo "Password:       $DEFAULT_PASSWORD (default, must change on first login)"
 echo "Home Directory: ${NFS_HOME}/${GROUP}/${USERNAME}"
-echo "Login:          ssh ${USERNAME}@login01"
+echo "Login:          ssh ${USERNAME}@{{ groups['login'][0] }}"
 if [[ " ${COMPUTE_GROUPS[@]} " =~ " ${GROUP} " ]]; then
 echo "Slurm Account:  $GROUP (cluster: ${SLURM_CLUSTER})"
 else
