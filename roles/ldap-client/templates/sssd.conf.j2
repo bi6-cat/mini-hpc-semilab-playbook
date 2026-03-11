@@ -17,7 +17,7 @@ ldap_search_base = {{ ldap_base_dn }}
 ldap_user_search_base = {{ ldap_user_base }}
 ldap_group_search_base = {{ ldap_group_base }}
 ldap_sudo_search_base = {{ ldap_sudo_base }}
-ldap_schema = rfc2307bis
+ldap_schema = rfc2307
 
 ldap_default_bind_dn = {{ ldap_bind_dn }}
 ldap_default_authtok_type = password
@@ -35,7 +35,7 @@ ldap_user_home_directory = homeDirectory
 ldap_user_shell = loginShell
 ldap_user_ssh_public_key = {{ ldap_ssh_public_key_attr }}
 
-override_homedir = /home/%u
+# homeDirectory is taken directly from LDAP attribute (supports /home/{group}/{user} layout)
 
 [nss]
 homedir_substring = /home

@@ -1,7 +1,9 @@
 ---
 ldap_client_packages:
   - sssd
+  - sssd-ldap
   - sssd-tools
   - oddjob
   - oddjob-mkhomedir
   - openldap-clients
+  - authselect

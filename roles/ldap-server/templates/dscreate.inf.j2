@@ -6,9 +6,11 @@ strict_host_checking = false
 
 [slapd]
 instance_name = {{ ldap_ds_instance }}
-root_dn = {{ ldap_ds_root_dn }}
 root_password = {{ ldap_ds_root_password }}
 port = {{ ldap_server_port }}
 secure_port = {{ ldap_server_secure_port }}
-suffix = {{ ldap_base_dn }}
 self_sign_cert = false
+
+[backend-userroot]
+suffix = {{ ldap_base_dn }}
+create_suffix_entry = True

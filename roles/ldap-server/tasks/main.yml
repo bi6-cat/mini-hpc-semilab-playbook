@@ -1,4 +1,10 @@
 ---
+- name: Enable 389-ds DNF module stream (required on Rocky/RHEL 8)
+  ansible.builtin.command: dnf module enable -y 389-ds:1.4
+  register: dnf_module_enable
+  changed_when: "'Enabling module streams' in dnf_module_enable.stdout"
+  failed_when: dnf_module_enable.rc != 0
+
 - name: Install LDAP server packages
   ansible.builtin.dnf:
     name: "{{ ldap_server_packages }}"

@@ -124,7 +124,7 @@ echo "Group $GROUP has GID: $GROUP_GID"
 
 # Set default password (user must change on first login)
 DEFAULT_PASSWORD="{{ hpc_default_user_password }}"
-PASSWORD_HASH=$(slappasswd -s "$DEFAULT_PASSWORD")
+PASSWORD_HASH=$(pwdhash -s SSHA512 "$DEFAULT_PASSWORD")
 HOME_DIR="${NFS_HOME}/${GROUP}/${USERNAME}"
 
 # Pick uidNumber based on existing entries

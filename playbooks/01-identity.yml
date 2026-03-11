@@ -4,6 +4,18 @@
   become: true
 
   pre_tasks:
+    - name: Assert required environment variables are set
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', 'LDAP_BIND_PASSWORD') | length > 0
+          - lookup('ansible.builtin.env', 'HPC_DEFAULT_USER_PASSWORD') | length > 0
+        fail_msg: |
+          Missing required environment variables!
+          Run: source .env
+          Then re-run the playbook.
+      delegate_to: localhost
+      run_once: true
+
     - name: Verify network connectivity
       ansible.builtin.ping:
 

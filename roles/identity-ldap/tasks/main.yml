@@ -57,7 +57,7 @@
   no_log: true
 
 - name: Hash admin user password
-  ansible.builtin.command: slappasswd -s "{{ ldap_admin_password }}"
+  ansible.builtin.command: pwdhash -s SSHA512 "{{ ldap_admin_password }}"
   register: ldap_admin_password_hash
   changed_when: false
   no_log: true
