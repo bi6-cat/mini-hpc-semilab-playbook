@@ -11,6 +11,13 @@
       - (ldap_bind_password | length) > 0
     fail_msg: "LDAP_BIND_PASSWORD is not set. Export it before running playbooks."
 
+- name: Validate admin SSH public keys variable type
+  ansible.builtin.assert:
+    that:
+      - ldap_admin_ssh_public_keys is iterable
+      - ldap_admin_ssh_public_keys is not string
+    fail_msg: "ldap_admin_ssh_public_keys must be a list of OpenSSH public keys"
+
 - name: Check if admin LDAP group exists
   ansible.builtin.command: >
     ldapsearch -x
@@ -72,6 +79,9 @@
     objectClass: inetOrgPerson
     objectClass: posixAccount
     objectClass: shadowAccount
+    {% if ldap_admin_ssh_public_keys | length > 0 %}
+    objectClass: ldapPublicKey
+    {% endif %}
     cn: {{ admin_user }}
     sn: Administrator
     givenName: HPC
@@ -82,10 +92,86 @@
     loginShell: {{ ldap_admin_shell }}
     mail: {{ admin_user }}@{{ ldap_domain }}
     userPassword: {{ ldap_admin_password_hash.stdout }}
+    {% for key in ldap_admin_ssh_public_keys %}
+    sshPublicKey: {{ key }}
+    {% endfor %}
     LDIF
   when: ldap_admin_user_check.rc != 0
   register: ldap_admin_user_create
   changed_when: ldap_admin_user_create.rc == 0
+  no_log: true
+
+- name: Read admin user objectClass attributes
+  ansible.builtin.command: >
+    ldapsearch -x
+    -H {{ ldap_local_uri }}
+    -D "{{ ldap_bind_dn }}"
+    -w "{{ ldap_bind_password }}"
+    -b "uid={{ admin_user }},{{ ldap_user_base }}"
+    -s base
+    "(objectClass=*)"
+    objectClass
+  register: ldap_admin_objectclass_attrs
+  changed_when: false
+  failed_when: ldap_admin_objectclass_attrs.rc != 0
+  when: ldap_admin_ssh_public_keys | length > 0
+  no_log: true
+
+- name: Ensure admin user has ldapPublicKey objectClass
+  ansible.builtin.shell: |
+    cat <<'LDIF' | ldapmodify -x -H {{ ldap_local_uri }} -D "{{ ldap_bind_dn }}" -w "{{ ldap_bind_password }}"
+    dn: uid={{ admin_user }},{{ ldap_user_base }}
+    changetype: modify
+    add: objectClass
+    objectClass: ldapPublicKey
+    LDIF
+  when:
+    - ldap_admin_ssh_public_keys | length > 0
+    - "'objectClass: ldapPublicKey' not in (ldap_admin_objectclass_attrs.stdout | default(''))"
+  register: ldap_admin_add_lpk_oc
+  changed_when: ldap_admin_add_lpk_oc.rc == 0
+  no_log: true
+
+- name: Read current admin SSH public keys from LDAP
+  ansible.builtin.command: >
+    ldapsearch -x
+    -H {{ ldap_local_uri }}
+    -D "{{ ldap_bind_dn }}"
+    -w "{{ ldap_bind_password }}"
+    -b "uid={{ admin_user }},{{ ldap_user_base }}"
+    -s base
+    "(objectClass=*)"
+    sshPublicKey
+  register: ldap_admin_ssh_keys_current
+  changed_when: false
+  failed_when: ldap_admin_ssh_keys_current.rc != 0
+  when: ldap_admin_ssh_public_keys | length > 0
+  no_log: true
+
+- name: Sync admin SSH public keys to LDAP
+  ansible.builtin.shell: |
+    cat <<'LDIF' | ldapmodify -x -H {{ ldap_local_uri }} -D "{{ ldap_bind_dn }}" -w "{{ ldap_bind_password }}"
+    dn: uid={{ admin_user }},{{ ldap_user_base }}
+    changetype: modify
+    replace: sshPublicKey
+    {% for key in ldap_admin_ssh_public_keys %}
+    sshPublicKey: {{ key }}
+    {% endfor %}
+    LDIF
+  when:
+    - ldap_admin_ssh_public_keys | length > 0
+    -
+      (
+        ldap_admin_ssh_keys_current.stdout_lines
+        | select('match', '^sshPublicKey:\\s+')
+        | map('regex_replace', '^sshPublicKey:\\s*', '')
+        | list
+        | sort
+      )
+      !=
+      (ldap_admin_ssh_public_keys | sort)
+  register: ldap_admin_ssh_keys_sync
+  changed_when: ldap_admin_ssh_keys_sync.rc == 0
   no_log: true
 
 - name: Check whether admin user is member of admin group

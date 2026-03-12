@@ -38,6 +38,15 @@
   when: not ldap_instance_dir.stat.exists
   register: dscreate_result
 
+- name: Copy OpenSSH LDAP schema for sshPublicKey to 389-ds schema directory
+  ansible.builtin.copy:
+    src: openssh-lpk-389ds.ldif
+    dest: "/etc/dirsrv/slapd-{{ ldap_ds_instance }}/schema/99-openssh-lpk.ldif"
+    owner: dirsrv
+    group: dirsrv
+    mode: '0644'
+  notify: Restart LDAP instance
+
 - name: Ensure LDAP instance service is enabled and running
   ansible.builtin.systemd:
     name: "dirsrv@{{ ldap_ds_instance }}"
@@ -49,15 +58,6 @@
     host: 127.0.0.1
     port: "{{ ldap_server_port }}"
     timeout: 120
-
-- name: Install OpenSSH LDAP schema for sshPublicKey
-  ansible.builtin.template:
-    src: openssh-lpk.ldif.j2
-    dest: "/etc/dirsrv/slapd-{{ ldap_ds_instance }}/schema/98openssh-lpk.ldif"
-    owner: root
-    group: root
-    mode: '0644'
-  notify: Restart LDAP instance
 
 - name: Render base OUs LDIF
   ansible.builtin.template:
