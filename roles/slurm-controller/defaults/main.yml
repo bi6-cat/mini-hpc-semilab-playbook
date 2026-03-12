@@ -44,7 +44,8 @@ slurm_accounts:
     description: "Guest Users Account"
     organization: "{{ cluster_name }}"
 
-# Service start order is important
+
+    # Service start order is important
 # 1. MariaDB
 # 2. Munge (from slurm-common)
 # 3. Slurmdbd (must start before slurmctld)

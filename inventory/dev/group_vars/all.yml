@@ -72,3 +72,8 @@ user_groups:
     login_cpu: 2
     login_mem_gb: 4
     compute_access: false
+
+# Slurm account mapping for LDAP users (explicit for easy debugging)
+slurm_user_account_mappings:
+  - user: hpc.test
+    account: stu

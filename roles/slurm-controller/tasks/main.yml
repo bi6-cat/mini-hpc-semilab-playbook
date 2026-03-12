@@ -61,7 +61,6 @@
     login_user: root
     login_password: "{{ mariadb_root_password }}"
     state: absent
-  ignore_errors: yes
 
 - name: "Remove MariaDB test database"
   community.mysql.mysql_db:
@@ -69,7 +68,6 @@
     login_user: root
     login_password: "{{ mariadb_root_password }}"
     state: absent
-  ignore_errors: yes
 
 - name: "Create Slurm accounting database"
   community.mysql.mysql_db:
@@ -191,6 +189,18 @@
   register: add_account
   failed_when: false
   changed_when: "'Adding Account' in add_account.stdout"
+
+- name: "Create Slurm user associations (for LDAP users)"
+  command: >
+    sacctmgr -i add user name={{ item.user }}
+    account={{ item.account }}
+    cluster={{ slurm_cluster_name }}
+    defaultaccount={{ item.account }}
+  loop: "{{ slurm_user_account_mappings }}"
+  register: add_user_assoc
+  failed_when: false
+  changed_when: "'Adding User' in add_user_assoc.stdout"
+  when: slurm_user_account_mappings | length > 0
 
 - name: "Verify Slurm controller status"
   command: scontrol ping

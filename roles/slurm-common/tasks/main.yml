@@ -10,7 +10,6 @@
   ansible.builtin.dnf:
     name: "{{ slurm_ohpc_release_url }}"
     state: present
-    disable_gpg_check: true
 
 - name: "Install Munge packages"
   dnf:

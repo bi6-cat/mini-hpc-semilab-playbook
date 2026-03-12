@@ -59,20 +59,6 @@
   when: not cgroup_conf_content.failed
   notify: restart slurmd
 
-# ==================== Cgroups v2 Configuration ====================
-
-- name: "Check if cgroups v2 is enabled"
-  stat:
-    path: /sys/fs/cgroup/cgroup.controllers
-  register: cgroup_v2
-
-- name: "Enable cgroups v2 controllers for Slurm"
-  shell: |
-    echo "+cpu +memory +pids" > /sys/fs/cgroup/cgroup.subtree_control
-  when: cgroup_v2.stat.exists
-  failed_when: false
-  changed_when: false
-
 # ==================== Enable and Start Slurmd ====================
 
 - name: "Enable and start Slurmd service"
