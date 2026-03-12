@@ -5,12 +5,21 @@
       - ldap_directory_manager_password | length > 0
     fail_msg: "Set LDAP_BIND_PASSWORD before running playbook"
 
-- name: Install LDAP server packages (LTS Rocky repos)
-  ansible.builtin.dnf:
+- name: Clean DNF cache
+  command: dnf clean all
+
+- name: Reset 389-ds module
+  command: dnf module reset 389-ds -y
+
+- name: Enable 389-ds 1.4 stream
+  command: dnf module enable 389-ds:1.4 -y
+
+- name: Install 389-ds server and client
+  dnf:
     name:
       - 389-ds-base
       - openldap-clients
-    state: present
+    state: latest
 
 - name: Render DS instance config
   ansible.builtin.template:

@@ -39,6 +39,167 @@ slurm_cluster_name: HPC-LAB
 slurm_state_dir: /var/spool/slurm/ctld
 slurm_log_dir: /var/log/slurm
 
+# Slurm common
+# OpenHPC 2.x cho Rocky Linux 8 (el8).
+# RPM nằm tại repos.openhpc.community 
+slurm_ohpc_release_url: "https://repos.openhpc.community/OpenHPC/2/EL_8/x86_64/ohpc-release-2-1.el8.x86_64.rpm"
+slurm_version: "23.02"
+slurm_packages:
+  - munge
+  - munge-libs
+  - slurm-ohpc
+  - slurm-perlapi-ohpc
+  - slurm-contribs-ohpc
+
+munge_key_path: /etc/munge/munge.key
+munge_user: munge
+munge_group: munge
+
+slurm_user: slurm
+slurm_group: slurm
+slurm_uid: 401
+slurm_gid: 401
+
+slurm_config_dir: /etc/slurm
+slurm_spool_dir: /var/spool/slurm
+slurm_slurmd_spool_dir: "{{ slurm_spool_dir }}/d"
+slurm_run_dir: /var/run/slurm
+
+slurm_control_machine: head01
+slurm_control_addr: "{{ hostvars['head01']['ansible_host'] }}"
+
+slurm_auth_type: auth/munge
+slurm_crypto_type: crypto/munge
+
+slurm_accounting_storage_type: accounting_storage/slurmdbd
+slurm_accounting_storage_host: "{{ slurm_control_machine }}"
+slurm_accounting_storage_port: 6819
+
+slurm_scheduler_type: sched/backfill
+slurm_select_type: select/cons_tres
+slurm_select_type_parameters: CR_Core_Memory
+
+slurm_slurmctld_port: 6817
+slurm_slurmd_port: 6818
+slurm_slurmdbd_port: 6819
+
+slurm_slurmctld_timeout: 300
+slurm_slurmd_timeout: 300
+slurm_inactive_limit: 0
+slurm_min_job_age: 300
+slurm_kill_wait: 30
+slurm_wait_time: 0
+
+slurm_slurmctld_debug: info
+slurm_slurmd_debug: info
+slurm_slurmctld_logfile: "{{ slurm_log_dir }}/slurmctld.log"
+slurm_slurmd_logfile: "{{ slurm_log_dir }}/slurmd.log"
+
+slurm_complete_wait: 0
+slurm_return_to_service: 1
+slurm_max_job_count: 10000
+slurm_max_array_size: 1000
+
+slurm_compute_nodes:
+  - name: compute01
+    addr: "{{ hostvars['compute01']['ansible_host'] }}"
+    cpus: "{{ hostvars['compute01']['slurm_cpu_count'] | default(2) }}"
+    memory: "{{ hostvars['compute01']['slurm_real_memory'] | default(4096) }}"
+    state: UNKNOWN
+  - name: compute02
+    addr: "{{ hostvars['compute02']['ansible_host'] }}"
+    cpus: "{{ hostvars['compute02']['slurm_cpu_count'] | default(2) }}"
+    memory: "{{ hostvars['compute02']['slurm_real_memory'] | default(4096) }}"
+    state: UNKNOWN
+
+slurm_partitions:
+  - name: regular
+    nodes: "compute[01-02]"
+    default: "YES"
+    max_time: "INFINITE"
+    state: UP
+    max_nodes: 2
+
+# Slurm controller
+slurm_controller_packages:
+  - slurm-slurmctld-ohpc
+  - slurm-slurmdbd-ohpc
+  - mariadb-server
+  - mariadb
+  - python3-PyMySQL
+
+slurm_db_name: slurm_acct_db
+slurm_db_user: slurm
+slurm_db_host: localhost
+slurm_db_port: 3306
+
+slurmdbd_auth_type: "{{ slurm_auth_type }}"
+slurmdbd_host: localhost
+slurmdbd_port: "{{ slurm_slurmdbd_port }}"
+slurmdbd_debug: info
+slurmdbd_logfile: "{{ slurm_log_dir }}/slurmdbd.log"
+slurmdbd_pidfile: "{{ slurm_run_dir }}/slurmdbd.pid"
+slurmdbd_archive_events: "no"
+slurmdbd_archive_jobs: "no"
+slurmdbd_archive_steps: "no"
+slurmdbd_purge_event: 12months
+slurmdbd_purge_job: 12months
+slurmdbd_purge_step: 1month
+
+slurm_accounts:
+  - name: lecture
+    description: "Lecturers/Teachers Account"
+    organization: "{{ cluster_name }}"
+  - name: stu
+    description: "Students Account"
+    organization: "{{ cluster_name }}"
+  - name: guest
+    description: "Guest Users Account"
+    organization: "{{ cluster_name }}"
+
+# Slurm worker
+slurm_worker_packages:
+  - slurm-slurmd-ohpc
+slurmd_debug: info
+slurmd_logfile: "{{ slurm_log_dir }}/slurmd.log"
+slurmd_spool_dir: "{{ slurm_slurmd_spool_dir }}"
+
+# LDAP
+ldap_domain: "{{ domain_name }}"
+ldap_base_dn: "dc={{ ldap_domain.split('.') | join(',dc=') }}"
+
+ldap_server_host: "head01.{{ domain_name }}"
+ldap_port: 389
+ldap_secure_port: 636
+ldap_uri: "ldap://{{ ldap_server_host }}"
+ldap_server_uri: "ldap://127.0.0.1:{{ ldap_port }}"
+
+ldap_ds_instance: instance
+ldap_directory_manager_dn: "cn=Directory Manager"
+ldap_directory_manager_password: "{{ lookup('ansible.builtin.env', 'LDAP_BIND_PASSWORD') }}"
+
+ldap_bind_dn: "cn=admin,{{ ldap_base_dn }}"
+ldap_bind_password: "{{ lookup('ansible.builtin.env', 'LDAP_BIND_PASSWORD') }}"
+
+ldap_user_base: "ou=people,{{ ldap_base_dn }}"
+ldap_group_base: "ou=groups,{{ ldap_base_dn }}"
+
+ldap_id_use_start_tls: true
+ldap_tls_reqcert: allow
+ldap_ssh_public_key_attr: sshPublicKey
+
+ldap_test_group: hpc-users
+ldap_test_group_gid: 20000
+
+ldap_test_user: hpc.test
+ldap_test_user_uid: 20000
+ldap_test_user_gid: "{{ ldap_test_group_gid }}"
+ldap_test_user_gecos: "HPC Test User"
+ldap_test_user_home: "/home/{{ ldap_test_user }}"
+ldap_test_user_shell: /bin/bash
+ldap_test_user_password: "{{ lookup('ansible.builtin.env', 'LDAP_TEST_USER_PASSWORD') | default(ldap_bind_password, true) }}"
+ldap_test_user_ssh_public_key: ""
+
 # SSH
 ssh_port: 22
 
@@ -73,7 +234,7 @@ user_groups:
     login_mem_gb: 4
     compute_access: false
 
-# Slurm account mapping for LDAP users (explicit for easy debugging)
+# Slurm account mapping for LDAP users 
 slurm_user_account_mappings:
   - user: hpc.test
     account: stu

@@ -1,24 +1,2 @@
-ldap_domain: "{{ domain_name }}"
-ldap_base_dn: "dc={{ ldap_domain.split('.') | join(',dc=') }}"
-
-ldap_server_uri: "ldap://127.0.0.1:{{ ldap_port }}"
-ldap_directory_manager_dn: "cn=Directory Manager"
-ldap_directory_manager_password: "{{ lookup('ansible.builtin.env', 'LDAP_BIND_PASSWORD') }}"
-
-ldap_bind_dn: "cn=admin,{{ ldap_base_dn }}"
-ldap_bind_password: "{{ lookup('ansible.builtin.env', 'LDAP_BIND_PASSWORD') }}"
-
-ldap_user_base: "ou=people,{{ ldap_base_dn }}"
-ldap_group_base: "ou=groups,{{ ldap_base_dn }}"
-
-ldap_test_group: hpc-users
-ldap_test_group_gid: 20000
-
-ldap_test_user: hpc.test
-ldap_test_user_uid: 20000
-ldap_test_user_gid: "{{ ldap_test_group_gid }}"
-ldap_test_user_gecos: "HPC Test User"
-ldap_test_user_home: "/home/{{ ldap_test_user }}"
-ldap_test_user_shell: /bin/bash
-ldap_test_user_password: "{{ lookup('ansible.builtin.env', 'LDAP_TEST_USER_PASSWORD') | default(ldap_bind_password, true) }}"
-ldap_test_user_ssh_public_key: ""
+---
+# Variables centralized in inventory/dev/group_vars/*.yml
