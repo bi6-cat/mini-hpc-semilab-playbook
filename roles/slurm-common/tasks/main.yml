@@ -6,16 +6,28 @@
   include_vars: "{{ ansible_os_family }}.yml"
   ignore_errors: true
 
+- name: "Download OpenHPC release RPM"
+  ansible.builtin.get_url:
+    url: "{{ slurm_ohpc_release_url }}"
+    dest: /tmp/ohpc-release.rpm
+    mode: '0644'
+
 - name: "Install OpenHPC release package"
   ansible.builtin.dnf:
-    name: "{{ slurm_ohpc_release_url }}"
+    name: /tmp/ohpc-release.rpm
     state: present
+    disable_gpg_check: true
 
 - name: "Install Munge packages"
   dnf:
     name:
       - munge
       - munge-libs
+    state: present
+
+- name: "Install Slurm common packages"
+  dnf:
+    name: "{{ slurm_packages }}"
     state: present
 
 - name: "Create Slurm group"

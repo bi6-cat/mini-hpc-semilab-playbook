@@ -2,8 +2,8 @@
 # RedHat/Rocky/CentOS specific Slurm variables
 
 slurm_packages:
-  - munge-ohpc
-  - munge-libs-ohpc
+  - munge
+  - munge-libs
   - slurm-ohpc
   - slurm-perlapi-ohpc
   - slurm-contribs-ohpc
