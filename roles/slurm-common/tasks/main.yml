@@ -6,15 +6,11 @@
   include_vars: "{{ ansible_os_family }}.yml"
   ignore_errors: true
 
-- name: "Install EPEL repository"
-  dnf:
-    name: epel-release
+- name: "Install OpenHPC release package"
+  ansible.builtin.dnf:
+    name: "{{ slurm_ohpc_release_url }}"
     state: present
-
-- name: "Install development tools"
-  dnf:
-    name: "@Development Tools"
-    state: present
+    disable_gpg_check: true
 
 - name: "Install Munge packages"
   dnf:
@@ -107,29 +103,4 @@
     fail_msg: "Munge authentication test failed"
     success_msg: "Munge authentication working correctly"
 
-- name: "Configure firewall for Munge (on controller)"
-  firewalld:
-    port: "{{ item }}"
-    permanent: yes
-    state: enabled
-    immediate: yes
-  loop:
-    - "{{ slurm_slurmctld_port }}/tcp"
-    - "{{ slurm_slurmdbd_port }}/tcp"
-  when:
-    - inventory_hostname == slurm_control_machine
-    - ansible_facts.services['firewalld.service'] is defined
-    - ansible_facts.services['firewalld.service'].state == 'running'
-  ignore_errors: yes
 
-- name: "Configure firewall for Slurmd (on compute nodes)"
-  firewalld:
-    port: "{{ slurm_slurmd_port }}/tcp"
-    permanent: yes
-    state: enabled
-    immediate: yes
-  when:
-    - slurm_node_type == 'compute'
-    - ansible_facts.services['firewalld.service'] is defined
-    - ansible_facts.services['firewalld.service'].state == 'running'
-  ignore_errors: yes

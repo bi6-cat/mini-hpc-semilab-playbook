@@ -1,9 +1,0 @@
----
-# Default umask for user privacy
-user_umask: "0077"
-
-# Default initial password for newly created users
-hpc_default_user_password: "{{ lookup('ansible.builtin.env', 'HPC_DEFAULT_USER_PASSWORD') }}"
-
-# Home directory permissions
-home_dir_mode: "0700"

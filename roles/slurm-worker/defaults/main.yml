@@ -4,7 +4,7 @@
 
 # Slurm worker packages
 slurm_worker_packages:
-  - slurm-slurmd
+  - slurm-slurmd-ohpc
 
 # Slurmd configuration
 slurmd_debug: info

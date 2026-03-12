@@ -2,12 +2,15 @@
 # Slurm Common Configuration
 # This role provides shared Slurm configuration for all nodes
 
-# Slurm version and packages
-slurm_version: "23.02"
+# OpenHPC release RPM (Rocky Linux 8)
+slurm_ohpc_release_url: "https://github.com/openhpc/ohpc/releases/download/v3.1.GA/ohpc-release-3-1.el8.x86_64.rpm"
+
+# Slurm version and packages (via OpenHPC repo)
+slurm_version: "23.11"
 slurm_packages:
-  - munge
-  - munge-libs
-  - slurm
+  - munge-ohpc
+  - munge-libs-ohpc
+  - slurm-ohpc
   - slurm-perlapi
   - slurm-contribs
 

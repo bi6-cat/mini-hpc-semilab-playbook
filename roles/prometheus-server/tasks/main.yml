@@ -39,20 +39,6 @@
     mode: '0644'
   notify: restart prometheus
 
-- name: Gather service facts
-  ansible.builtin.service_facts:
-
-- name: Configure firewall for Prometheus
-  ansible.posix.firewalld:
-    port: "{{ prometheus_port }}/tcp"
-    permanent: yes
-    state: enabled
-    immediate: yes
-  when:
-    - ansible_facts.services['firewalld.service'] is defined
-    - ansible_facts.services['firewalld.service'].state == 'running'
-  ignore_errors: yes
-
 - name: Enable and start Prometheus service
   ansible.builtin.systemd:
     name: "{{ prometheus_service_name }}"

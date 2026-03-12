@@ -4,8 +4,8 @@
 
 # Slurm controller packages
 slurm_controller_packages:
-  - slurm-slurmctld
-  - slurm-slurmdbd
+  - slurm-slurmctld-ohpc
+  - slurm-slurmdbd-ohpc
   - mariadb-server
   - mariadb
   - python3-PyMySQL
