@@ -251,6 +251,13 @@
       changed_when: false
       failed_when: verify_ssh_keys_cmd.rc != 0
 
+    - name: Verify SSSD returns LDAP SSH public keys for admin user
+      ansible.builtin.command: sss_ssh_authorizedkeys {{ admin_user }}
+      register: verify_ssh_keys_lookup
+      changed_when: false
+      failed_when: verify_ssh_keys_lookup.rc != 0 or (verify_ssh_keys_lookup.stdout_lines | length) == 0
+      when: ldap_admin_ssh_public_keys | default([]) | length > 0
+
     - name: Verify sudoers NSS order includes SSSD
       ansible.builtin.command: grep '^sudoers:\s*files\s*sss' /etc/nsswitch.conf
       register: verify_sudoers_nss
