@@ -1,8 +1,5 @@
 slurm_node_type: head
 
-# LDAP Server
-ldap_setup: server
-
 # Slurm Controller
 slurm_dbd_host: "localhost"
 slurm_dbd_port: 6819

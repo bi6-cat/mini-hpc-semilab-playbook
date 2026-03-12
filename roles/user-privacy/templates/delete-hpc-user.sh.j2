@@ -1,11 +1,15 @@
 #!/bin/bash
 # User deletion script for HPC cluster
-# Removes FreeIPA account, NFS home directory, and blacklists username
+# Removes LDAP account, NFS home directory, and blacklists username
 
 set -e
 
-DOMAIN="{{ freeipa_domain }}"
-ADMIN_PASSWORD="{{ freeipa_admin_password }}"
+DOMAIN="{{ ldap_domain }}"
+LDAP_URI="{{ ldap_uri }}"
+LDAP_BIND_DN="{{ ldap_bind_dn }}"
+LDAP_BIND_PASSWORD="{{ ldap_bind_password }}"
+LDAP_USER_BASE="{{ ldap_user_base }}"
+LDAP_GROUP_BASE="{{ ldap_group_base }}"
 NFS_HOME="{{ nfs_home }}"
 STORAGE_NODE="{{ groups['storage'][0] }}"
 STORAGE_USER="hpcadmin"   # SSH user with key-based auth to storage
@@ -24,7 +28,7 @@ Examples:
     $0 student10
     $0 guest02 --force
 
-WARNING: Deletes FreeIPA account, home directory, and all user data.
+WARNING: Deletes LDAP account, home directory, and all user data.
 Username will be permanently blacklisted and cannot be reused.
 
 EOF
@@ -43,21 +47,20 @@ if [ "$2" == "--force" ]; then
     FORCE=true
 fi
 
-# Authenticate to FreeIPA
-echo "Obtaining Kerberos TGT..."
-echo "$ADMIN_PASSWORD" | kinit admin
-
 # Verify user exists
-if ! ipa user-show "$USERNAME" &>/dev/null; then
-    echo "Error: User $USERNAME not found in FreeIPA"
-    kdestroy
+USER_DN="uid=${USERNAME},${LDAP_USER_BASE}"
+
+if ! ldapsearch -x -H "$LDAP_URI" -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" \
+    -b "$USER_DN" -s base "(objectClass=posixAccount)" dn >/dev/null 2>&1; then
+        echo "Error: User $USERNAME not found in LDAP"
     exit 1
 fi
 
 # Retrieve user metadata
-USER_INFO=$(ipa user-show "$USERNAME" --raw)
-USER_HOME=$(echo "$USER_INFO" | grep "homedirectory:" | awk '{print $2}')
-USER_GROUPS=$(ipa user-show "$USERNAME" | grep "Member of groups:" -A 10 | grep -v "Member of groups:" | xargs)
+USER_HOME=$(ldapsearch -LLL -x -H "$LDAP_URI" -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" \
+    -b "$USER_DN" -s base "(objectClass=posixAccount)" homeDirectory | awk '/^homeDirectory:/{print $2}')
+USER_GROUPS=$(ldapsearch -LLL -x -H "$LDAP_URI" -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" \
+    -b "$LDAP_GROUP_BASE" "(memberUid=${USERNAME})" cn | awk '/^cn:/{print $2}' | xargs)
 
 echo "=========================================="
 echo "DELETE USER"
@@ -68,7 +71,7 @@ echo "Groups:         $USER_GROUPS"
 echo "=========================================="
 echo ""
 echo "WARNING: This will PERMANENTLY DELETE:"
-echo "  - FreeIPA account"
+echo "  - LDAP account"
 echo "  - Home directory and all files"
 echo "  - Username will be blacklisted"
 echo ""
@@ -81,21 +84,31 @@ if [ "$FORCE" = false ]; then
     read -p "Type 'DELETE' to confirm: " CONFIRM
     if [ "$CONFIRM" != "DELETE" ]; then
         echo "Deletion cancelled."
-        kdestroy
         exit 0
     fi
 fi
 
-# Delete FreeIPA account
+# Remove memberUid from LDAP groups first
+if [ -n "$USER_GROUPS" ]; then
+  for GROUP in $USER_GROUPS; do
+    cat <<EOF | ldapmodify -x -H "$LDAP_URI" -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" >/dev/null 2>&1 || true
+dn: cn=${GROUP},${LDAP_GROUP_BASE}
+changetype: modify
+delete: memberUid
+memberUid: ${USERNAME}
+EOF
+  done
+fi
+
+# Delete LDAP account
 echo ""
-echo "Deleting FreeIPA account..."
-ipa user-del "$USERNAME" || {
-    echo "Error: Failed to delete FreeIPA account"
-    kdestroy
+echo "Deleting LDAP account..."
+ldapdelete -x -H "$LDAP_URI" -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" "$USER_DN" || {
+    echo "Error: Failed to delete LDAP account"
     exit 1
 }
 
-echo "✓ FreeIPA account deleted"
+echo "LDAP account deleted"
 
 # Remove home directory from NFS storage
 if [ -n "$USER_HOME" ] && [ "$USER_HOME" != "/" ]; then
@@ -138,8 +151,6 @@ if ! grep -q "^${USERNAME}$" "$DELETED_USERS_FILE" 2>/dev/null; then
 else
     echo "✓ Already blacklisted"
 fi
-
-kdestroy
 
 echo ""
 echo "=========================================="

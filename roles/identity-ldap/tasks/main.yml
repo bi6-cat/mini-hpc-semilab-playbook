@@ -1,6 +1,0 @@
----
-- name: Phase 1 placeholder for LDAP identity management role
-  ansible.builtin.debug:
-    msg:
-      - "LDAP identity management scaffold is active."
-      - "Phase 3 will create users, groups, sudo rules, and SSH keys in LDAP."

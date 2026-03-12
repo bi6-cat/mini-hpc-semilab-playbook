@@ -1,8 +1,5 @@
 slurm_node_type: login
 
-# LDAP Client
-ldap_setup: client
-
 # GUI Components
 gui_enabled: true
 openondemand_enabled: true

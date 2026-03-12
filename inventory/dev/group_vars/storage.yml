@@ -30,6 +30,3 @@ quota_group_limits:
 
 # Optional: per-user override (nếu cần)
 quota_user_limits: []
-
-# LDAP Client
-ldap_setup: client

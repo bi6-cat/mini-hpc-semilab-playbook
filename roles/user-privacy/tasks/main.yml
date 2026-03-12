@@ -1,4 +1,9 @@
 ---
+- name: Ensure LDAP CLI tools are installed
+  ansible.builtin.dnf:
+    name: openldap-clients
+    state: present
+
 - name: Configure restrictive umask in profile.d
   ansible.builtin.lineinfile:
     path: /etc/profile.d/umask.sh
