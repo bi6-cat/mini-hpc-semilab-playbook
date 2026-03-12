@@ -1,0 +1,84 @@
+#!/bin/bash
+# Create HPC user in OpenLDAP and Slurm accounting
+# Usage: create-hpc-user.sh <username> <group_name> <"Full Name">
+set -euo pipefail
+
+LDAP_URI="{{ ldap_server_uri }}"
+MANAGER_DN="{{ ldap_directory_manager_dn }}"
+MANAGER_PASS="${LDAP_BIND_PASSWORD:?LDAP_BIND_PASSWORD not set}"
+USER_BASE="{{ ldap_user_base }}"
+GROUP_BASE="{{ ldap_group_base }}"
+UID_MIN=10000
+
+USERNAME="${1:?Usage: $0 <username> <group_name> <Full Name>}"
+GROUP_NAME="${2:?}"
+GECOS="${3:?}"
+HOME_DIR="/home/${USERNAME}"
+SHELL="/bin/bash"
+
+# Resolve group GID from LDAP
+GID_NUM="$(ldapsearch -LLL -x -H "$LDAP_URI" \
+  -D "$MANAGER_DN" -w "$MANAGER_PASS" \
+  -b "cn=${GROUP_NAME},${GROUP_BASE}" gidNumber 2>/dev/null \
+  | awk '/^gidNumber:/{print $2}')"
+
+[ -z "$GID_NUM" ] && { echo "ERROR: group '${GROUP_NAME}' not found in LDAP"; exit 1; }
+
+# Check user does not already exist
+ldapsearch -LLL -x -H "$LDAP_URI" \
+  -D "$MANAGER_DN" -w "$MANAGER_PASS" \
+  -b "uid=${USERNAME},${USER_BASE}" -s base dn 2>/dev/null \
+  | grep -q "^dn:" && { echo "ERROR: user '${USERNAME}' already exists"; exit 1; }
+
+# Auto-assign next available UID
+MAX_UID="$(ldapsearch -LLL -x -H "$LDAP_URI" \
+  -D "$MANAGER_DN" -w "$MANAGER_PASS" \
+  -b "$USER_BASE" "(uidNumber>=1)" uidNumber 2>/dev/null \
+  | awk '/^uidNumber:/{print $2}' | sort -n | tail -1)"
+
+if [ -z "$MAX_UID" ] || [ "$MAX_UID" -lt "$UID_MIN" ]; then
+  UID_NUM="$UID_MIN"
+else
+  UID_NUM="$(( MAX_UID + 1 ))"
+fi
+
+# Generate hashed password (prompts for password)
+echo -n "Password for ${USERNAME}: "
+read -rs RAW_PASS
+echo
+HASHED_PASS="$(python3 -c "
+import hashlib, base64, os
+p = '${RAW_PASS}'.encode()
+s = os.urandom(4)
+h = hashlib.sha1(p + s).digest()
+print('{SSHA}' + base64.b64encode(h + s).decode())
+")"
+
+# Build and add LDIF
+ldapadd -x -H "$LDAP_URI" -D "$MANAGER_DN" -w "$MANAGER_PASS" <<EOF
+dn: uid=${USERNAME},${USER_BASE}
+objectClass: top
+objectClass: account
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: ${GECOS}
+uid: ${USERNAME}
+uidNumber: ${UID_NUM}
+gidNumber: ${GID_NUM}
+homeDirectory: ${HOME_DIR}
+loginShell: ${SHELL}
+gecos: ${GECOS}
+userPassword: ${HASHED_PASS}
+EOF
+
+# Add to Slurm accounting
+if command -v sacctmgr &>/dev/null; then
+  if sacctmgr -i add user "${USERNAME}" account="${GROUP_NAME}" cluster="{{ slurm_cluster_name }}" 2>/dev/null; then
+    echo "Slurm: user '${USERNAME}' added to account '${GROUP_NAME}'"
+  else
+    echo "WARN: Could not add to Slurm accounting (run manually as slurm operator):"
+    echo "  sacctmgr -i add user ${USERNAME} account=${GROUP_NAME} cluster={{ slurm_cluster_name }}"
+  fi
+fi
+
+echo "Created user '${USERNAME}' (uid=${UID_NUM}, gid=${GID_NUM}, group=${GROUP_NAME})"

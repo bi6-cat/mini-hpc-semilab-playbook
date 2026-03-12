@@ -18,6 +18,14 @@
     group: root
     mode: "0600"
 
+- name: Render user groups LDIF
+  ansible.builtin.template:
+    src: groups.ldif.j2
+    dest: /root/groups.ldif
+    owner: root
+    group: root
+    mode: "0600"
+
 - name: Render LDAP test user LDIF
   ansible.builtin.template:
     src: test-user.ldif.j2
@@ -26,23 +34,33 @@
     group: root
     mode: "0600"
 
-- name: Check if bind user exists
+- name: Check if base structure exists
   ansible.builtin.command: >-
     ldapsearch -LLL -x -H {{ ldap_server_uri }}
     -D "{{ ldap_directory_manager_dn }}"
     -w "{{ ldap_directory_manager_password }}"
-    -b "{{ ldap_bind_dn }}" -s base "(objectClass=*)" dn
-  register: ldap_bind_user_check
+    -b "{{ ldap_user_base }}" -s base "(objectClass=*)" dn
+  register: ldap_base_check
   changed_when: false
   failed_when: false
 
-- name: Seed base LDAP objects
+- name: Seed base LDAP objects (OUs, bind account, hpc-users group)
   ansible.builtin.command: >-
     ldapadd -x -H {{ ldap_server_uri }}
     -D "{{ ldap_directory_manager_dn }}"
     -w "{{ ldap_directory_manager_password }}"
     -f /root/base.ldif
-  when: ldap_bind_user_check.rc != 0
+  when: ldap_base_check.rc != 0
+
+- name: Seed user groups (skip existing entries)
+  ansible.builtin.command: >-
+    ldapadd -c -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -f /root/groups.ldif
+  register: ldap_groups_add
+  changed_when: "'adding new entry' in ldap_groups_add.stdout"
+  failed_when: ldap_groups_add.rc not in [0, 68]
 
 - name: Check if test user exists
   ansible.builtin.command: >-
@@ -61,3 +79,16 @@
     -w "{{ ldap_directory_manager_password }}"
     -f /root/test-user.ldif
   when: ldap_test_user_check.rc != 0
+
+- name: Deploy user management scripts
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - src: create-hpc-user.sh.j2
+      dest: /usr/local/bin/create-hpc-user.sh
+    - src: delete-hpc-user.sh.j2
+      dest: /usr/local/bin/delete-hpc-user.sh

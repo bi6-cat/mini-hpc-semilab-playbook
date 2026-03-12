@@ -4,8 +4,8 @@ domain_name: lab.local
 timezone: Asia/Ho_Chi_Minh
 
 # Admin
-admin_user: ldapadmin
-admin_group: ldapadmins
+admin_user: hpcadmin
+admin_group: hpcadmins
 
 # OS Configuration
 os_packages:
@@ -184,7 +184,7 @@ ldap_bind_password: "{{ lookup('ansible.builtin.env', 'LDAP_BIND_PASSWORD') }}"
 ldap_user_base: "ou=people,{{ ldap_base_dn }}"
 ldap_group_base: "ou=groups,{{ ldap_base_dn }}"
 
-ldap_id_use_start_tls: true
+ldap_id_use_start_tls: false
 ldap_tls_reqcert: allow
 ldap_ssh_public_key_attr: sshPublicKey
 

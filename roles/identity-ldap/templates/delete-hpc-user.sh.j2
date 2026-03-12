@@ -1,0 +1,33 @@
+#!/bin/bash
+# Delete HPC user from OpenLDAP and Slurm accounting
+# Usage: delete-hpc-user.sh <username>
+set -euo pipefail
+
+LDAP_URI="{{ ldap_server_uri }}"
+MANAGER_DN="{{ ldap_directory_manager_dn }}"
+MANAGER_PASS="${LDAP_BIND_PASSWORD:?LDAP_BIND_PASSWORD not set}"
+USER_BASE="{{ ldap_user_base }}"
+
+USERNAME="${1:?Usage: $0 <username>}"
+
+# Verify user exists
+ldapsearch -LLL -x -H "$LDAP_URI" \
+  -D "$MANAGER_DN" -w "$MANAGER_PASS" \
+  -b "uid=${USERNAME},${USER_BASE}" -s base dn 2>/dev/null \
+  | grep -q "^dn:" || { echo "ERROR: user '${USERNAME}' not found in LDAP"; exit 1; }
+
+# Confirm
+read -rp "Delete user '${USERNAME}'? [y/N] " CONFIRM
+[[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo "Aborted"; exit 0; }
+
+# Remove from LDAP
+ldapdelete -x -H "$LDAP_URI" \
+  -D "$MANAGER_DN" -w "$MANAGER_PASS" \
+  "uid=${USERNAME},${USER_BASE}"
+
+# Remove from Slurm accounting
+if command -v sacctmgr &>/dev/null; then
+  sacctmgr -i delete user "${USERNAME}" cluster="{{ slurm_cluster_name }}" || true
+fi
+
+echo "Deleted user '${USERNAME}'"
