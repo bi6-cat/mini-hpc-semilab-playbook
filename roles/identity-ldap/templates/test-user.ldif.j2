@@ -1,0 +1,18 @@
+dn: uid={{ ldap_test_user }},{{ ldap_user_base }}
+objectClass: top
+objectClass: account
+objectClass: posixAccount
+objectClass: shadowAccount
+{% if ldap_test_user_ssh_public_key | length > 0 %}
+objectClass: ldapPublicKey
+{% endif %}
+cn: {{ ldap_test_user_gecos }}
+uid: {{ ldap_test_user }}
+uidNumber: {{ ldap_test_user_uid }}
+gidNumber: {{ ldap_test_user_gid }}
+homeDirectory: {{ ldap_test_user_home }}
+loginShell: {{ ldap_test_user_shell }}
+userPassword: {{ ldap_test_user_password }}
+{% if ldap_test_user_ssh_public_key | length > 0 %}
+sshPublicKey: {{ ldap_test_user_ssh_public_key }}
+{% endif %}

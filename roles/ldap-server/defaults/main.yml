@@ -1,0 +1,10 @@
+ldap_domain: "{{ domain_name }}"
+ldap_base_dn: "dc={{ ldap_domain.split('.') | join(',dc=') }}"
+
+ldap_server_host: "head01.{{ domain_name }}"
+ldap_port: 389
+ldap_secure_port: 636
+
+ldap_ds_instance: instance
+ldap_directory_manager_dn: "cn=Directory Manager"
+ldap_directory_manager_password: "{{ lookup('ansible.builtin.env', 'LDAP_BIND_PASSWORD') }}"

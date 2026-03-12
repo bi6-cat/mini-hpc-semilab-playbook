@@ -1,0 +1,63 @@
+---
+- name: Validate LDAP bind password is provided
+  ansible.builtin.assert:
+    that:
+      - ldap_bind_password | length > 0
+    fail_msg: "Set LDAP_BIND_PASSWORD before running playbook"
+
+- name: Install LDAP client tools on server
+  ansible.builtin.dnf:
+    name: openldap-clients
+    state: present
+
+- name: Render base LDAP objects LDIF
+  ansible.builtin.template:
+    src: base.ldif.j2
+    dest: /root/base.ldif
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Render LDAP test user LDIF
+  ansible.builtin.template:
+    src: test-user.ldif.j2
+    dest: /root/test-user.ldif
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Check if bind user exists
+  ansible.builtin.command: >-
+    ldapsearch -LLL -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -b "{{ ldap_bind_dn }}" -s base "(objectClass=*)" dn
+  register: ldap_bind_user_check
+  changed_when: false
+  failed_when: false
+
+- name: Seed base LDAP objects
+  ansible.builtin.command: >-
+    ldapadd -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -f /root/base.ldif
+  when: ldap_bind_user_check.rc != 0
+
+- name: Check if test user exists
+  ansible.builtin.command: >-
+    ldapsearch -LLL -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -b "uid={{ ldap_test_user }},{{ ldap_user_base }}" -s base "(objectClass=*)" dn
+  register: ldap_test_user_check
+  changed_when: false
+  failed_when: false
+
+- name: Seed LDAP test user
+  ansible.builtin.command: >-
+    ldapadd -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -f /root/test-user.ldif
+  when: ldap_test_user_check.rc != 0

@@ -1,0 +1,18 @@
+ldap_domain: "{{ domain_name }}"
+ldap_base_dn: "dc={{ ldap_domain.split('.') | join(',dc=') }}"
+
+ldap_server_host: "head01.{{ domain_name }}"
+ldap_port: 389
+ldap_uri: "ldap://{{ ldap_server_host }}"
+
+ldap_bind_dn: "cn=admin,{{ ldap_base_dn }}"
+ldap_bind_password: "{{ lookup('ansible.builtin.env', 'LDAP_BIND_PASSWORD') }}"
+
+ldap_user_base: "ou=people,{{ ldap_base_dn }}"
+ldap_group_base: "ou=groups,{{ ldap_base_dn }}"
+
+ldap_id_use_start_tls: true
+ldap_tls_reqcert: allow
+ldap_ssh_public_key_attr: sshPublicKey
+
+ldap_test_user: hpc.test

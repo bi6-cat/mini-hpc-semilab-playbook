@@ -1,0 +1,75 @@
+---
+- name: Validate LDAP bind password is provided
+  ansible.builtin.assert:
+    that:
+      - ldap_bind_password | length > 0
+    fail_msg: "Set LDAP_BIND_PASSWORD before running playbook"
+
+- name: Install LDAP client packages (LTS Rocky repos)
+  ansible.builtin.dnf:
+    name:
+      - openldap-clients
+      - sssd
+      - sssd-ldap
+      - sssd-tools
+      - authselect
+      - oddjob
+      - oddjob-mkhomedir
+    state: present
+
+- name: Render sssd.conf
+  ansible.builtin.template:
+    src: sssd.conf.j2
+    dest: /etc/sssd/sssd.conf
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart sssd
+
+- name: Read current authselect profile
+  ansible.builtin.command: authselect current
+  register: ldap_authselect_current
+  changed_when: false
+  failed_when: false
+
+- name: Enable sssd profile with mkhomedir
+  ansible.builtin.command: authselect select sssd with-mkhomedir --force
+  when: >-
+    'Profile ID: sssd' not in ldap_authselect_current.stdout
+    or 'with-mkhomedir' not in ldap_authselect_current.stdout
+
+- name: Enable and start SSSD service
+  ansible.builtin.systemd:
+    name: sssd
+    state: started
+    enabled: true
+
+- name: Enable and start oddjobd service
+  ansible.builtin.systemd:
+    name: oddjobd
+    state: started
+    enabled: true
+
+- name: Configure AuthorizedKeysCommand
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^AuthorizedKeysCommand\s+'
+    line: 'AuthorizedKeysCommand /usr/bin/sss_ssh_authorizedkeys'
+  notify: Restart sshd
+
+- name: Configure AuthorizedKeysCommandUser
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^AuthorizedKeysCommandUser\s+'
+    line: 'AuthorizedKeysCommandUser nobody'
+  notify: Restart sshd
+
+- name: Verify LDAP user resolution
+  ansible.builtin.command: getent passwd {{ ldap_test_user }}
+  register: ldap_getent_test
+  changed_when: false
+  failed_when: false
+
+- name: Show LDAP client lookup status
+  ansible.builtin.debug:
+    msg: "Lookup {{ ldap_test_user }} => {{ 'OK' if ldap_getent_test.rc == 0 else 'pending' }}"
