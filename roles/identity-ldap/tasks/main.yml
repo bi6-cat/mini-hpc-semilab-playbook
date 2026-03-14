@@ -26,6 +26,22 @@
     group: root
     mode: "0600"
 
+# Cho phép cn admin đọc toàn bộ cây LDAP để xác thực người dùng và nhóm
+- name: Setup ACI on base domain for access
+  ansible.builtin.command: >-
+    ldapmodify -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_base_dn }}
+      changetype: modify
+      add: aci
+      aci: (targetattr="*")(version 3.0; acl "Allow admin read"; allow(all)(userdn="ldap:///{{ ldap_bind_dn }}");)
+  register: __aci_add
+  failed_when: __aci_add.rc not in [0, 20]
+  changed_when: __aci_add.rc == 0
+
 - name: Render LDAP test user LDIF
   ansible.builtin.template:
     src: test-user.ldif.j2

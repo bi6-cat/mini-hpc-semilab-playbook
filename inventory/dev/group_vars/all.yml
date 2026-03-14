@@ -35,7 +35,8 @@ nfs_proj: /proj
 nfs_soft: /soft
 
 # Slurm
-slurm_cluster_name: HPC-LAB
+# hpc-lab in lowercase to avoid slurmdb mismatch
+slurm_cluster_name: hpc-lab
 slurm_state_dir: /var/spool/slurm/ctld
 slurm_log_dir: /var/log/slurm
 

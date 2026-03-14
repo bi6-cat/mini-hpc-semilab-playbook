@@ -1,0 +1,230 @@
+#!/bin/bash
+# User provisioning script for HPC cluster
+# Creates LDAP user with group-based home directory on NFS
+
+set -e
+
+DOMAIN="{{ ldap_domain }}"
+LDAP_URI="{{ ldap_uri }}"
+LDAP_BIND_DN="{{ ldap_bind_dn }}"
+LDAP_BIND_PASSWORD="{{ ldap_bind_password }}"
+LDAP_USER_BASE="{{ ldap_user_base }}"
+LDAP_GROUP_BASE="{{ ldap_group_base }}"
+NFS_HOME="{{ nfs_home }}"
+STORAGE_NODE="{{ groups['storage'][0] }}"
+STORAGE_USER="hpcadmin"   # SSH user with key-based auth to storage
+STORAGE_KEY="/home/hpcadmin/.ssh/id_ed25519"  # explicit key (script may run as root)
+SSH_CMD="ssh -o StrictHostKeyChecking=no -o BatchMode=yes -i $STORAGE_KEY"
+
+usage() {
+    cat << EOF
+Usage: $0 <username> <firstname> <lastname> <group>
+
+Arguments:
+    username    Username (alphanumeric, lowercase)
+    firstname   Given name
+    lastname    Surname
+    group       User group (lecture, stu, guest)
+
+Examples:
+    $0 lecture05 Teacher Five lecture
+    $0 student10 Student Ten stu
+
+Available groups:
+{% for group in user_groups %}
+    {{ group.name }}: {{ group.description }}
+{% endfor %}
+
+EOF
+    exit 1
+}
+
+# Check arguments
+if [ $# -ne 4 ]; then
+    usage
+fi
+
+USERNAME=$1
+FIRSTNAME=$2
+LASTNAME=$3
+GROUP=$4
+
+# Validate group membership
+VALID_GROUPS=({% for group in user_groups %}"{{ group.name }}" {% endfor %})
+if [[ ! " ${VALID_GROUPS[@]} " =~ " ${GROUP} " ]]; then
+    echo "Error: Invalid group '$GROUP'"
+    echo "Valid groups: ${VALID_GROUPS[@]}"
+    exit 1
+fi
+
+echo "=========================================="
+echo "Creating HPC User"
+echo "=========================================="
+echo "Username:  $USERNAME"
+echo "Name:      $FIRSTNAME $LASTNAME"
+echo "Group:     $GROUP"
+echo "Home:      ${NFS_HOME}/${GROUP}/${USERNAME}"
+echo "=========================================="
+echo ""
+
+# Check username blacklist (prevents reuse of deleted accounts)
+DELETED_USERS_FILE="/var/lib/hpc/deleted-users.txt"
+if [ -f "$DELETED_USERS_FILE" ] && grep -q "^${USERNAME}$" "$DELETED_USERS_FILE"; then
+    echo ""
+    echo "==========================================" 
+    echo "ERROR: Username '${USERNAME}' is blacklisted"
+    echo "==========================================" 
+    echo "This username was previously deleted and cannot be reused."
+    echo "Blacklist prevents UID/GID conflicts and permission issues."
+    echo ""
+    echo "View blacklist: cat $DELETED_USERS_FILE"
+    echo "==========================================" 
+    exit 1
+fi
+
+# Check if user already exists in LDAP
+if ldapsearch -x -H "$LDAP_URI" -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" \
+    -b "uid=${USERNAME},${LDAP_USER_BASE}" -s base "(objectClass=posixAccount)" dn >/dev/null 2>&1; then
+    echo "Error: User $USERNAME already exists in LDAP"
+    exit 1
+fi
+
+# Check for existing home directory (orphaned from failed previous deletion)
+echo "Checking NFS storage..."
+HOME_EXISTS=$($SSH_CMD "$STORAGE_USER@$STORAGE_NODE" "sudo -n test -d '${NFS_HOME}/${GROUP}/${USERNAME}' && echo 'yes' || echo 'no'")
+
+if [ "$HOME_EXISTS" = "yes" ]; then
+    echo ""
+    echo "==========================================" 
+    echo "ERROR: Home directory already exists"
+    echo "==========================================" 
+    echo "Path: ${NFS_HOME}/${GROUP}/${USERNAME}"
+    echo ""
+    echo "Likely cause: Previous deletion did not complete successfully."
+    echo ""
+    echo "Manual cleanup required:"
+    echo "  ssh $STORAGE_NODE"
+    echo "  sudo rm -rf ${NFS_HOME}/${GROUP}/${USERNAME}"
+    echo "==========================================" 
+    exit 1
+fi
+
+# Provision user in LDAP
+echo "Creating LDAP user..."
+
+# Get GID of target group for setting as primary group
+GROUP_GID=$(ldapsearch -LLL -x -H "$LDAP_URI" -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" \
+    -b "cn=${GROUP},${LDAP_GROUP_BASE}" -s base "(objectClass=posixGroup)" gidNumber | awk '/^gidNumber:/{print $2}')
+if [ -z "$GROUP_GID" ]; then
+    echo "Error: Could not determine GID for group $GROUP"
+    exit 1
+fi
+
+echo "Group $GROUP has GID: $GROUP_GID"
+
+# Set default password (user must change on first login)
+DEFAULT_PASSWORD="{{ hpc_default_user_password }}"
+PASSWORD_HASH=$(slappasswd -s "$DEFAULT_PASSWORD")
+HOME_DIR="${NFS_HOME}/${GROUP}/${USERNAME}"
+
+# Pick uidNumber based on existing entries
+MAX_UID=$(ldapsearch -LLL -x -H "$LDAP_URI" -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" \
+    -b "$LDAP_USER_BASE" "(uidNumber=*)" uidNumber | awk '/^uidNumber:/{print $2}' | sort -n | tail -1)
+
+if [ -z "$MAX_UID" ]; then
+        NEW_UID=20001
+else
+        NEW_UID=$((MAX_UID + 1))
+fi
+
+cat <<EOF | ldapadd -x -H "$LDAP_URI" -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD"
+dn: uid=${USERNAME},${LDAP_USER_BASE}
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+objectClass: ldapPublicKey
+cn: ${FIRSTNAME} ${LASTNAME}
+sn: ${LASTNAME}
+givenName: ${FIRSTNAME}
+uid: ${USERNAME}
+uidNumber: ${NEW_UID}
+gidNumber: ${GROUP_GID}
+homeDirectory: ${HOME_DIR}
+loginShell: /bin/bash
+mail: ${USERNAME}@${DOMAIN}
+userPassword: ${PASSWORD_HASH}
+EOF
+
+# Add to group (now as primary group member)
+echo "Adding to group $GROUP..."
+cat <<EOF | ldapmodify -x -H "$LDAP_URI" -D "$LDAP_BIND_DN" -w "$LDAP_BIND_PASSWORD" >/dev/null 2>&1 || true
+dn: cn=${GROUP},${LDAP_GROUP_BASE}
+changetype: modify
+add: memberUid
+memberUid: ${USERNAME}
+EOF
+
+# Register user in Slurm accounting (only for groups with compute access)
+COMPUTE_GROUPS=({% for g in user_groups if g.compute_access %}"{{ g.name }}" {% endfor %})
+SLURM_CLUSTER="{{ slurm_cluster_name }}"
+
+if [[ " ${COMPUTE_GROUPS[@]} " =~ " ${GROUP} " ]]; then
+    echo "Registering user in Slurm accounting (cluster: ${SLURM_CLUSTER})..."
+    if command -v sacctmgr &>/dev/null; then
+        if sudo -n sacctmgr -i add user "$USERNAME" Account="$GROUP" Cluster="$SLURM_CLUSTER"; then
+            sudo -n sacctmgr -i modify user where name="$USERNAME" set DefaultAccount="$GROUP" || true
+            echo "Slurm account: OK"
+        else
+            echo "Error: Slurm registration failed"
+            echo "Run manually on head node:"
+            echo "  sudo sacctmgr -i add user $USERNAME Account=$GROUP Cluster=$SLURM_CLUSTER"
+            echo "  sudo sacctmgr -i modify user where name=$USERNAME set DefaultAccount=$GROUP"
+            exit 1
+        fi
+    else
+        echo "Error: sacctmgr not found on this host. Run manually on head01:"
+        echo "  sudo sacctmgr -i add user $USERNAME Account=$GROUP Cluster=$SLURM_CLUSTER"
+        exit 1
+    fi
+else
+    echo "Group '$GROUP' has no compute access — skipping Slurm registration."
+fi
+
+# Create home directory on NFS storage
+echo "Creating home directory on NFS..."
+$SSH_CMD "$STORAGE_USER@$STORAGE_NODE" << EOSSH
+    if ! sudo -n true 2>/dev/null; then
+        echo "Error: NOPASSWD sudo is required on ${STORAGE_NODE}"
+        exit 1
+    fi
+
+    sudo -n mkdir -p "${NFS_HOME}/${GROUP}/${USERNAME}"
+    
+    # Copy /etc/skel to initialize user home with defaults
+    sudo -n cp -r /etc/skel/. "${NFS_HOME}/${GROUP}/${USERNAME}/"
+    
+    sudo -n chown -R "${USERNAME}:${GROUP}" "${NFS_HOME}/${GROUP}/${USERNAME}"
+    sudo -n chmod 700 "${NFS_HOME}/${GROUP}/${USERNAME}"
+
+    sudo -n ls -ld "${NFS_HOME}/${GROUP}/${USERNAME}"
+EOSSH
+
+echo ""
+echo "=========================================="
+echo "User provisioned successfully"
+echo "=========================================="
+echo "Username:       $USERNAME"
+echo "Password:       $DEFAULT_PASSWORD (default, must change on first login)"
+echo "Home Directory: ${NFS_HOME}/${GROUP}/${USERNAME}"
+echo "Login:          ssh ${USERNAME}@login01"
+if [[ " ${COMPUTE_GROUPS[@]} " =~ " ${GROUP} " ]]; then
+echo "Slurm Account:  $GROUP (cluster: ${SLURM_CLUSTER})"
+else
+echo "Slurm Access:   None (guest group)"
+fi
+echo ""
+echo "NOTE: User must change password on first login"
+echo "=========================================="

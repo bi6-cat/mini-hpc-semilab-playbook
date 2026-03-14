@@ -73,12 +73,24 @@ EOF
 
 # Add to Slurm accounting
 if command -v sacctmgr &>/dev/null; then
-  if sacctmgr -i add user "${USERNAME}" account="${GROUP_NAME}" cluster="{{ slurm_cluster_name }}" 2>/dev/null; then
-    echo "Slurm: user '${USERNAME}' added to account '${GROUP_NAME}'"
+  if sacctmgr -i add user "${USERNAME}" account="${GROUP_NAME}" cluster="{{ slurm_cluster_name }}" >/dev/null 2>&1; then
+    SLURM_STATUS="Success"
   else
-    echo "WARN: Could not add to Slurm accounting (run manually as slurm operator):"
-    echo "  sacctmgr -i add user ${USERNAME} account=${GROUP_NAME} cluster={{ slurm_cluster_name }}"
+    SLURM_STATUS="Failed (run manually: sacctmgr -i add user ${USERNAME} account=${GROUP_NAME})"
   fi
+else
+  SLURM_STATUS="Not skipped (sacctmgr not found)"
 fi
 
-echo "Created user '${USERNAME}' (uid=${UID_NUM}, gid=${GID_NUM}, group=${GROUP_NAME})"
+echo -e "\n============================================="
+echo "           USER CREATION SUMMARY             "
+echo "============================================="
+echo " Username        : ${USERNAME}"
+echo " Full Name       : ${GECOS}"
+echo " Password        : ****** (Saved & Hashed)"
+echo " Group (Account) : ${GROUP_NAME} (GID: ${GID_NUM})"
+echo " UID Number      : ${UID_NUM}"
+echo " Home Directory  : ${HOME_DIR}"
+echo " Login Shell     : ${SHELL}"
+echo " Slurm Account   : ${SLURM_STATUS}"
+echo "============================================="

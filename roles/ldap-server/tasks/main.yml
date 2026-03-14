@@ -5,14 +5,23 @@
       - ldap_directory_manager_password | length > 0
     fail_msg: "Set LDAP_BIND_PASSWORD before running playbook"
 
+- name: Check if 389-ds module is already enabled
+  ansible.builtin.shell: dnf module list 389-ds | grep -E '1\.4.*\[e\]'
+  register: ds_module_status
+  failed_when: false
+  changed_when: false
+
 - name: Clean DNF cache
-  command: dnf clean all
+  ansible.builtin.command: dnf clean all
+  when: ds_module_status.rc != 0
 
 - name: Reset 389-ds module
-  command: dnf module reset 389-ds -y
+  ansible.builtin.command: dnf module reset 389-ds -y
+  when: ds_module_status.rc != 0
 
 - name: Enable 389-ds 1.4 stream
-  command: dnf module enable 389-ds:1.4 -y
+  ansible.builtin.command: dnf module enable 389-ds:1.4 -y
+  when: ds_module_status.rc != 0
 
 - name: Install 389-ds server and client
   dnf:
