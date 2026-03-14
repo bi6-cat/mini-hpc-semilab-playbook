@@ -42,7 +42,7 @@
       {% for e in nfs_exports %}
       {{ e.path }} {{ e.clients }}({{ e.options }})
       {% endfor %}
-  notify: Apply NFS exports
+  notify: apply nfs exports
 
 - name: Enable and start rpcbind
   ansible.builtin.systemd:

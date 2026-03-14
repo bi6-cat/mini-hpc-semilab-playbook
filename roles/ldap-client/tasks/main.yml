@@ -24,7 +24,7 @@
     owner: root
     group: root
     mode: "0600"
-  notify: Restart sssd
+  notify: restart sssd
 
 - name: Read current authselect profile
   ansible.builtin.command: authselect current
@@ -55,14 +55,14 @@
     path: /etc/ssh/sshd_config
     regexp: '^AuthorizedKeysCommand\s+'
     line: 'AuthorizedKeysCommand /usr/bin/sss_ssh_authorizedkeys'
-  notify: Restart sshd
+  notify: restart sshd
 
 - name: Configure AuthorizedKeysCommandUser
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^AuthorizedKeysCommandUser\s+'
     line: 'AuthorizedKeysCommandUser nobody'
-  notify: Restart sshd
+  notify: restart sshd
 
 - name: Verify LDAP user resolution
   ansible.builtin.command: getent passwd {{ ldap_test_user }}

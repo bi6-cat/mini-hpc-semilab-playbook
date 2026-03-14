@@ -1,6 +1,6 @@
 ---
 # handlers file for nfs-server
 
-- name: Apply NFS exports
+- name: apply nfs exports
   ansible.builtin.command: exportfs -ra
-  listen: Apply NFS exports
+  listen: apply nfs exports
