@@ -1,26 +1,17 @@
 ---
-- name: Validate LDAP bind password is provided
-  ansible.builtin.assert:
-    that:
-      - ldap_bind_password | length > 0
-    fail_msg: "Set LDAP_BIND_PASSWORD before running playbook"
+- name: Validate LDAP variable contract
+  ansible.builtin.include_role:
+    name: ldap-contract
 
 - name: Install LDAP client packages (LTS Rocky repos)
   ansible.builtin.dnf:
-    name:
-      - openldap-clients
-      - sssd
-      - sssd-ldap
-      - sssd-tools
-      - authselect
-      - oddjob
-      - oddjob-mkhomedir
+    name: "{{ ldap_client_packages }}"
     state: present
 
 - name: Render sssd.conf
   ansible.builtin.template:
     src: sssd.conf.j2
-    dest: /etc/sssd/sssd.conf
+    dest: "{{ ldap_client_sssd_conf_path }}"
     owner: root
     group: root
     mode: "0600"
@@ -65,11 +56,12 @@
   notify: restart sshd
 
 - name: Verify LDAP user resolution
-  ansible.builtin.command: getent passwd {{ ldap_test_user }}
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ ldap_client_verify_user }}"
   register: ldap_getent_test
-  changed_when: false
   failed_when: false
 
 - name: Show LDAP client lookup status
   ansible.builtin.debug:
-    msg: "Lookup {{ ldap_test_user }} => {{ 'OK' if ldap_getent_test.rc == 0 else 'pending' }}"
+    msg: "Lookup {{ ldap_client_verify_user }} => {{ 'OK' if ldap_client_verify_user in (ldap_getent_test.ansible_facts.getent_passwd | default({})) else 'pending' }}"

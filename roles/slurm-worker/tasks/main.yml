@@ -9,6 +9,7 @@
     line: 'X11UseLocalhost no'
     state: present
   notify: restart sshd
+  when: slurm_worker_enable_x11use_localhost_no | bool
 
 - name: "Install Slurm worker packages"
   dnf:
@@ -81,12 +82,14 @@
   failed_when: slurmd_status.status.ActiveState != 'active'
 
 - name: "Check Slurmd connection to controller"
-  shell: |
-    systemctl status slurmd | grep -i "registered"
-  register: slurmd_registered
-  failed_when: false
+  ansible.builtin.command: scontrol ping
+  register: slurm_controller_ping
+  delegate_to: "{{ slurm_control_machine }}"
   changed_when: false
+  failed_when: false
 
 - name: "Display Slurmd status"
   debug:
-    msg: "Slurmd is {{ slurmd_status.status.ActiveState }} and running on port {{ slurm_slurmd_port }}"
+    msg:
+      - "Slurmd is {{ slurmd_status.status.ActiveState }} and running on port {{ slurm_slurmd_port }}"
+      - "Controller ping: {{ slurm_controller_ping.stdout | default('unavailable') }}"

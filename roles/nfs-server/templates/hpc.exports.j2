@@ -1,0 +1,5 @@
+# Managed by Ansible (role: nfs-server)
+# File: /etc/exports.d/hpc.exports
+{% for e in nfs_exports %}
+{{ e.path }} {{ e.clients }}({{ e.options }})
+{% endfor %}

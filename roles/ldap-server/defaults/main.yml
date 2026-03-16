@@ -1,2 +1,17 @@
 ---
-# Variables centralized in inventory/dev/group_vars/*.yml
+# LDAP server role defaults (inventory should override environment-specific values)
+ldap_server_module_stream: "1.4"
+ldap_server_packages:
+  - 389-ds-base
+  - openldap-clients
+
+ldap_server_ds_inf_path: /root/ds.inf
+ldap_server_instance_path: "/etc/dirsrv/slapd-{{ ldap_ds_instance }}"
+ldap_server_service_name: "dirsrv@{{ ldap_ds_instance }}"
+
+# Extend shared LDAP contract with server-specific requirements.
+ldap_contract_required_vars:
+  - ldap_ds_instance
+  - ldap_port
+  - ldap_directory_manager_dn
+  - ldap_directory_manager_password

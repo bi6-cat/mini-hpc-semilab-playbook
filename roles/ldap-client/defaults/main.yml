@@ -1,2 +1,21 @@
 ---
-# Variables centralized in inventory/dev/group_vars/*.yml
+# LDAP client role defaults (inventory should override environment-specific values)
+ldap_client_packages:
+  - openldap-clients
+  - sssd
+  - sssd-ldap
+  - sssd-tools
+  - authselect
+  - oddjob
+  - oddjob-mkhomedir
+
+ldap_client_sssd_conf_path: /etc/sssd/sssd.conf
+ldap_client_verify_user: "{{ ldap_test_user | default('hpc.test') }}"
+
+# Extend shared LDAP contract with client-specific requirements.
+ldap_contract_required_vars:
+  - ldap_server_host
+  - ldap_bind_dn
+  - ldap_bind_password
+  - ldap_user_base
+  - ldap_group_base

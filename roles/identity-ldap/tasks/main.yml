@@ -1,19 +1,17 @@
 ---
-- name: Validate LDAP bind password is provided
-  ansible.builtin.assert:
-    that:
-      - ldap_bind_password | length > 0
-    fail_msg: "Set LDAP_BIND_PASSWORD before running playbook"
+- name: Validate LDAP variable contract
+  ansible.builtin.include_role:
+    name: ldap-contract
 
 - name: Install LDAP client tools on server
   ansible.builtin.dnf:
-    name: openldap-clients
+    name: "{{ identity_ldap_packages }}"
     state: present
 
 - name: Render base LDAP objects LDIF
   ansible.builtin.template:
     src: base.ldif.j2
-    dest: /root/base.ldif
+    dest: "{{ identity_ldap_base_ldif_path }}"
     owner: root
     group: root
     mode: "0600"
@@ -21,7 +19,7 @@
 - name: Render user groups LDIF
   ansible.builtin.template:
     src: groups.ldif.j2
-    dest: /root/groups.ldif
+    dest: "{{ identity_ldap_groups_ldif_path }}"
     owner: root
     group: root
     mode: "0600"
@@ -45,7 +43,7 @@
 - name: Render LDAP test user LDIF
   ansible.builtin.template:
     src: test-user.ldif.j2
-    dest: /root/test-user.ldif
+    dest: "{{ identity_ldap_test_user_ldif_path }}"
     owner: root
     group: root
     mode: "0600"
@@ -65,7 +63,7 @@
     ldapadd -x -H {{ ldap_server_uri }}
     -D "{{ ldap_directory_manager_dn }}"
     -w "{{ ldap_directory_manager_password }}"
-    -f /root/base.ldif
+    -f {{ identity_ldap_base_ldif_path }}
   when: ldap_base_check.rc != 0
 
 - name: Seed user groups (skip existing entries)
@@ -73,7 +71,7 @@
     ldapadd -c -x -H {{ ldap_server_uri }}
     -D "{{ ldap_directory_manager_dn }}"
     -w "{{ ldap_directory_manager_password }}"
-    -f /root/groups.ldif
+    -f {{ identity_ldap_groups_ldif_path }}
   register: ldap_groups_add
   changed_when: "'adding new entry' in ldap_groups_add.stdout"
   failed_when: ldap_groups_add.rc not in [0, 68]
@@ -93,7 +91,7 @@
     ldapadd -x -H {{ ldap_server_uri }}
     -D "{{ ldap_directory_manager_dn }}"
     -w "{{ ldap_directory_manager_password }}"
-    -f /root/test-user.ldif
+    -f {{ identity_ldap_test_user_ldif_path }}
   when: ldap_test_user_check.rc != 0
 
 - name: Deploy user management scripts
@@ -103,8 +101,4 @@
     owner: root
     group: root
     mode: '0755'
-  loop:
-    - src: create-hpc-user.sh.j2
-      dest: /usr/local/bin/create-hpc-user.sh
-    - src: delete-hpc-user.sh.j2
-      dest: /usr/local/bin/delete-hpc-user.sh
+  loop: "{{ identity_ldap_user_scripts }}"

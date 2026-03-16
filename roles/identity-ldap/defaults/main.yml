@@ -1,2 +1,24 @@
 ---
-# Variables centralized in inventory/dev/group_vars/*.yml
+identity_ldap_packages:
+  - openldap-clients
+
+identity_ldap_base_ldif_path: /root/base.ldif
+identity_ldap_groups_ldif_path: /root/groups.ldif
+identity_ldap_test_user_ldif_path: /root/test-user.ldif
+
+identity_ldap_user_scripts:
+  - src: create-hpc-user.sh.j2
+    dest: /usr/local/bin/create-hpc-user.sh
+  - src: delete-hpc-user.sh.j2
+    dest: /usr/local/bin/delete-hpc-user.sh
+
+# Extend shared LDAP contract with identity-seeding requirements.
+ldap_contract_required_vars:
+  - ldap_server_uri
+  - ldap_base_dn
+  - ldap_user_base
+  - ldap_group_base
+  - ldap_bind_dn
+  - ldap_bind_password
+  - ldap_directory_manager_dn
+  - ldap_directory_manager_password

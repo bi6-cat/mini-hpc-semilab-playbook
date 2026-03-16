@@ -1,2 +1,6 @@
 ---
-# Variables centralized in inventory/dev/group_vars/*.yml
+slurm_worker_packages:
+  - slurm-slurmd-ohpc
+
+slurmd_spool_dir: "{{ slurm_slurmd_spool_dir | default('/var/spool/slurm/d') }}"
+slurm_worker_enable_x11use_localhost_no: true

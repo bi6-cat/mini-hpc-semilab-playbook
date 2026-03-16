@@ -15,6 +15,10 @@ slurm_packages:
 munge_key_path: /etc/munge/munge.key
 munge_user: munge
 munge_group: munge
+munge_service_name: munge
+munge_key_seed_length: 1024
+munge_cleanup_legacy_staging: true
+munge_legacy_staging_path: /tmp/munge.key
 
 # Slurm user/group
 slurm_user: slurm

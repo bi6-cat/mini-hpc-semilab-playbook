@@ -1,7 +1,17 @@
 ---
-# defaults file for nfs-server
-
 nfs_server_enabled: false
+
+nfs_server_packages:
+  - nfs-utils
+  - rpcbind
+  - quota
+
+nfs_server_rpcbind_service: rpcbind
+nfs_server_service: nfs-server
+nfs_server_exports_dir: /etc/exports.d
+nfs_server_exports_file: /etc/exports.d/hpc.exports
+nfs_server_show_exports: true
+
 nfs_exports: []
 # Example:
 # nfs_exports:

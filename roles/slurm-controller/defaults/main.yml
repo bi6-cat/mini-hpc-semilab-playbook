@@ -1,2 +1,17 @@
 ---
-# Variables centralized in inventory/dev/group_vars/*.yml
+slurm_controller_packages:
+  - slurm-slurmctld-ohpc
+  - slurm-slurmdbd-ohpc
+  - mariadb-server
+  - mariadb
+  - python3-PyMySQL
+
+mariadb_root_password: "{{ lookup('ansible.builtin.env', 'MARIADB_ROOT_PASSWORD') | default('', true) }}"
+mariadb_slurm_password: "{{ lookup('ansible.builtin.env', 'MARIADB_SLURM_PASSWORD') | default('', true) }}"
+
+slurm_db_name: slurm_acct_db
+slurm_db_user: slurm
+slurm_db_port: 3306
+
+slurm_accounts: []
+slurm_user_account_mappings: []
