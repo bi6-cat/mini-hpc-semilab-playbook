@@ -148,13 +148,13 @@ slurmdbd_purge_job: 12months
 slurmdbd_purge_step: 1month
 
 slurm_accounts:
-  - name: lecture
+  - name: g_lec
     description: "Lecturers/Teachers Account"
     organization: "{{ cluster_name }}"
-  - name: stu
+  - name: g_stu
     description: "Students Account"
     organization: "{{ cluster_name }}"
-  - name: guest
+  - name: g_guest
     description: "Guest Users Account"
     organization: "{{ cluster_name }}"
 
@@ -228,7 +228,7 @@ slurm_exporter_port: 9341
 
 # User Groups Configuration
 user_groups:
-  - name: lecture
+  - name: g_lec
     gid: 10001
     description: "Lecturers/Teachers Group"
     sudo_access: false
@@ -236,7 +236,7 @@ user_groups:
     login_cpu: 8
     login_mem_gb: 16
     compute_access: true
-  - name: stu
+  - name: g_stu
     gid: 10002
     description: "Students Group"
     sudo_access: false
@@ -244,7 +244,7 @@ user_groups:
     login_cpu: 4
     login_mem_gb: 8
     compute_access: true
-  - name: guest
+  - name: g_guest
     gid: 10003
     description: "Guest Users Group"
     sudo_access: false
@@ -256,4 +256,4 @@ user_groups:
 # Slurm account mapping for LDAP users 
 slurm_user_account_mappings:
   - user: hpc.test
-    account: stu
+    account: g_stu
