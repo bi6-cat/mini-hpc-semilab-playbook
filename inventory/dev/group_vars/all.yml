@@ -185,8 +185,8 @@ ldap_bind_password: "{{ lookup('ansible.builtin.env', 'LDAP_BIND_PASSWORD') }}"
 ldap_user_base: "ou=people,{{ ldap_base_dn }}"
 ldap_group_base: "ou=groups,{{ ldap_base_dn }}"
 
-ldap_id_use_start_tls: false
-ldap_tls_reqcert: allow
+ldap_id_use_start_tls: true          # StartTLS: mã hóa kết nối LDAP trên port 389
+ldap_tls_reqcert: allow              # Chấp nhận self-signed cert do 389-ds tự tạo
 ldap_ssh_public_key_attr: sshPublicKey
 
 ldap_test_group: hpc-users
@@ -203,6 +203,15 @@ ldap_test_user_ssh_public_key: ""
 
 # SSH
 ssh_port: 22
+
+# Security
+# selinux_state: mặc định enforcing cho toàn cụm.
+#   Ngoại lệ → group_vars/compute.yml: permissive (tránh vỡ Slurm jobs).
+selinux_state: enforcing
+
+# sssd_ldap_access_filter: giới hạn PAM login chỉ cho HPC users (uidNumber >= 10000).
+#   Ngoại lệ → group_vars/head.yml: "(uidNumber<=0)" (block toàn bộ LDAP user khỏi head01).
+sssd_ldap_access_filter: "(uidNumber>=10000)"
 
 # Monitoring
 node_exporter_port: 9100

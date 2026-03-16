@@ -24,8 +24,40 @@
     group: root
     mode: "0600"
 
-# Cho phép cn admin đọc toàn bộ cây LDAP để xác thực người dùng và nhóm
-- name: Setup ACI on base domain for access
+# Cho phép bind DN (dùng bởi SSSD) chỉ đọc cây LDAP để xác thực người dùng và nhóm.
+# allow(read,search,compare) — không cho phép ghi/xóa/modify.
+# create-hpc-user.sh và delete-hpc-user.sh dùng Directory Manager trực tiếp, không bị ảnh hưởng.
+
+- name: Read current ACIs on base domain
+  ansible.builtin.command: >-
+    ldapsearch -LLL -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -b "{{ ldap_base_dn }}" -s base "(objectClass=*)" aci
+  register: __aci_current
+  changed_when: false
+  failed_when: false
+
+- name: Remove overly-permissive ACI (allow all) if present
+  ansible.builtin.command: >-
+    ldapmodify -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_base_dn }}
+      changetype: modify
+      delete: aci
+      aci: (targetattr="*")(version 3.0; acl "Allow admin read"; allow(all)(userdn="ldap:///{{ ldap_bind_dn }}");)
+  register: __aci_delete
+  when: >-
+    __aci_current.rc == 0 and
+    'allow(all)' in __aci_current.stdout and
+    ldap_bind_dn in __aci_current.stdout
+  failed_when: __aci_delete.rc not in [0, 16]
+  changed_when: __aci_delete.rc == 0
+
+- name: Setup read-only ACI on base domain for bind DN
   ansible.builtin.command: >-
     ldapmodify -x -H {{ ldap_server_uri }}
     -D "{{ ldap_directory_manager_dn }}"
@@ -35,7 +67,7 @@
       dn: {{ ldap_base_dn }}
       changetype: modify
       add: aci
-      aci: (targetattr="*")(version 3.0; acl "Allow admin read"; allow(all)(userdn="ldap:///{{ ldap_bind_dn }}");)
+      aci: (targetattr="*")(version 3.0; acl "Allow admin read"; allow(read,search,compare)(userdn="ldap:///{{ ldap_bind_dn }}");)
   register: __aci_add
   failed_when: __aci_add.rc not in [0, 20]
   changed_when: __aci_add.rc == 0

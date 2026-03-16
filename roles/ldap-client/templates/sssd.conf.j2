@@ -19,7 +19,8 @@ ldap_id_use_start_tls = {{ ldap_id_use_start_tls | ternary('true', 'false') }}
 ldap_tls_reqcert = {{ ldap_tls_reqcert }}
 ldap_user_ssh_public_key = {{ ldap_ssh_public_key_attr }}
 enumerate = false
-access_provider = permit
+access_provider = ldap
+ldap_access_filter = {{ sssd_ldap_access_filter }}
 fallback_homedir = /home/%u
 default_shell = /bin/bash
 

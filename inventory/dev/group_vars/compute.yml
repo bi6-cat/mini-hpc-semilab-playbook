@@ -1,10 +1,14 @@
 slurm_node_type: compute
 
+# SELinux: giữ permissive trên compute để tránh chặn Slurm job execution
+# Chỉ nâng lên enforcing sau khi kiểm tra đủ audit log (audit2allow)(not recommend for lab environment).
+selinux_state: permissive
+
 # CPU/Memory configuration
 cpu_cores: 12
 memory_gb: 30     
 
-# Slurm settings
+# Slurm settings (đơn vị tính)
 slurm_cpu_count: "{{ cpu_cores }}"
 slurm_real_memory: "{{ memory_gb * 1024 }}"
 

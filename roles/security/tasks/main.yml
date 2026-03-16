@@ -12,3 +12,17 @@
   ansible.builtin.command: getenforce
   register: selinux_mode
   changed_when: false
+
+# Booleans tối thiểu cho HPC semi-lab:
+#   authlogin_nsswitch_use_ldap — cho phép SSSD kết nối LDAP qua NSS/PAM
+#   use_nfs_home_dirs           — cho phép truy cập /home mount từ NFS
+# Chỉ set khi node chạy enforcing (compute giữ permissive nên task này bị skip)
+- name: Set SELinux booleans for HPC services
+  ansible.posix.seboolean:
+    name: "{{ item }}"
+    state: true
+    persistent: true
+  loop:
+    - authlogin_nsswitch_use_ldap
+    - use_nfs_home_dirs
+  when: selinux_state == 'enforcing'

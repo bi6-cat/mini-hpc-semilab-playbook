@@ -1,5 +1,9 @@
 slurm_node_type: head
 
+# SSSD: block toàn bộ LDAP user khỏi đăng nhập trực tiếp vào head01.
+# Admin (hpcadmin) là local account — không bị ảnh hưởng bởi SSSD access filter.
+sssd_ldap_access_filter: "(uidNumber<=0)"
+
 # Slurm Controller
 slurm_dbd_host: "localhost"
 slurm_dbd_port: 6819
@@ -8,11 +12,11 @@ slurm_dbd_port: 6819
 mariadb_root_password: "{{ lookup('ansible.builtin.env', 'MARIADB_ROOT_PASSWORD') }}"
 mariadb_slurm_password: "{{ lookup('ansible.builtin.env', 'MARIADB_SLURM_PASSWORD') }}"
 
-# NFS Server
+# NFS Server (Ko bật ở head)
 nfs_server_enabled: false
 
 # NFS mount points (NFSv3 - Head is an NFS client)
-# NOTE: /home is NOT mounted on head to avoid conflict with local hpcadmin home
+# NOTE: Không mount home ở head tránh conflict với local home của hpcadmin (uid 1000).
 nfs_mounts:
   - path: "{{ nfs_proj }}"
     server: storage01

@@ -1,1 +1,2 @@
+# Safe fallback — giá trị thực tế được set tại inventory/dev/group_vars/all.yml
 selinux_state: permissive
