@@ -18,13 +18,13 @@ quota_enabled: true
 
 # Group quota: tất cả user trong group dùng chung quota pool
 quota_group_limits:
-  - groupname: stu
+  - groupname: g_stu
     soft_gb: 280
     hard_gb: 300
-  - groupname: lecture
+  - groupname: g_lec
     soft_gb: 180
     hard_gb: 200
-  - groupname: guest
+  - groupname: g_guest
     soft_gb: 18
     hard_gb: 20
 

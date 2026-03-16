@@ -13,7 +13,7 @@ quota_initialize_ext_filesystems: true
 # Group quota limits (shared pool for entire group)
 # Users must have this as their primary group for quota to apply
 quota_group_limits: []
-  # - groupname: stu
+  # - groupname: g_stu
   #   soft_gb: 90
   #   hard_gb: 100
 

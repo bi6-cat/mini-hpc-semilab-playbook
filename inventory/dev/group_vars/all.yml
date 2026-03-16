@@ -114,10 +114,47 @@ slurm_compute_nodes:
     state: UNKNOWN
 
 slurm_partitions:
-  - name: regular
+  - name: tiny
+    nodes: "compute[01-02]"
+    default: "NO"
+    max_time: "1:00:00"
+    MaxCPUsPerNode: 4
+    MaxMemPerCPU: 4096
+    DefMemPerCPU: 2048
+    state: UP
+    max_nodes: 2
+  - name: small
     nodes: "compute[01-02]"
     default: "YES"
+    max_time: "4:00:00"
+    MaxCPUsPerNode: 8
+    MaxMemPerCPU: 4096
+    DefMemPerCPU: 2048
+    state: UP
+    max_nodes: 2
+  - name: medium
+    nodes: "compute[01-02]"
+    default: "NO"
+    max_time: "12:00:00"
+    MaxCPUsPerNode: 16
+    MaxMemPerCPU: 4096
+    DefMemPerCPU: 2048
+    state: UP
+    max_nodes: 2
+  - name: large
+    nodes: "compute[01-02]"
+    default: "NO"
+    max_time: "24:00:00"
+    MaxCPUsPerNode: 32
+    MaxMemPerCPU: 4096
+    DefMemPerCPU: 2048
+    state: UP
+    max_nodes: 2
+  - name: infinite
+    nodes: "compute[01-02]"
+    default: "NO"
     max_time: "INFINITE"
+    AllowGroups: "g_lec,hpcadmins"
     state: UP
     max_nodes: 2
 
