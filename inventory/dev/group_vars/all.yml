@@ -185,6 +185,15 @@ ldap_bind_password: "{{ lookup('ansible.builtin.env', 'LDAP_BIND_PASSWORD') }}"
 ldap_user_base: "ou=people,{{ ldap_base_dn }}"
 ldap_group_base: "ou=groups,{{ ldap_base_dn }}"
 
+# Scoped service account — chỉ dùng cho create/delete-hpc-user.sh
+# Quyền giới hạn: write ou=people, write memberUid trong ou=groups
+# KHÔNG dùng Directory Manager cho user scripts
+ldap_useradmin_dn: "cn=hpc-useradmin,{{ ldap_base_dn }}"
+ldap_useradmin_password: "{{ lookup('ansible.builtin.env', 'LDAP_USERADMIN_PASSWORD') }}"
+
+# UID counter — monotonic, không bao giờ tái sử dụng UID đã xóa
+hpc_uid_counter_path: /etc/hpc/uid-next
+
 ldap_id_use_start_tls: true          # StartTLS: mã hóa kết nối LDAP trên port 389
 ldap_tls_reqcert: allow              # Chấp nhận self-signed cert do 389-ds tự tạo
 ldap_ssh_public_key_attr: sshPublicKey
@@ -207,7 +216,7 @@ ssh_port: 22
 # Security
 # selinux_state: mặc định enforcing cho toàn cụm.
 #   Ngoại lệ → group_vars/compute.yml: permissive (tránh vỡ Slurm jobs).
-selinux_state: enforcing
+selinux_state: permissive
 
 # sssd_ldap_access_filter: giới hạn PAM login chỉ cho HPC users (uidNumber >= 10000).
 #   Ngoại lệ → group_vars/head.yml: "(uidNumber<=0)" (block toàn bộ LDAP user khỏi head01).

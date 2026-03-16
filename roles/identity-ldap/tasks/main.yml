@@ -24,9 +24,9 @@
     group: root
     mode: "0600"
 
-# Cho phép bind DN (dùng bởi SSSD) chỉ đọc cây LDAP để xác thực người dùng và nhóm.
+# Cho phép bind DN (dùng bởi SSSD) chỉ đọc cây LDAP.
 # allow(read,search,compare) — không cho phép ghi/xóa/modify.
-# create-hpc-user.sh và delete-hpc-user.sh dùng Directory Manager trực tiếp, không bị ảnh hưởng.
+# create/delete-hpc-user.sh dùng cn=hpc-useradmin (scoped service account).
 
 - name: Read current ACIs on base domain
   ansible.builtin.command: >-
@@ -134,3 +134,71 @@
     group: root
     mode: '0755'
   loop: "{{ identity_ldap_user_scripts }}"
+
+# --- Scoped service account: cn=hpc-useradmin ---
+# Dùng cho create/delete-hpc-user.sh thay vì Directory Manager.
+# Quyền giới hạn: full control trên ou=people, chỉ write memberUid trên ou=groups.
+
+- name: Check if hpc-useradmin account exists
+  ansible.builtin.command: >-
+    ldapsearch -LLL -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -b "{{ ldap_useradmin_dn }}" -s base "(objectClass=*)" dn
+  register: __useradmin_check
+  changed_when: false
+  failed_when: false
+
+- name: Create hpc-useradmin service account
+  ansible.builtin.command: >-
+    ldapadd -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_useradmin_dn }}
+      objectClass: top
+      objectClass: organizationalRole
+      objectClass: simpleSecurityObject
+      cn: hpc-useradmin
+      description: Scoped service account for HPC user management scripts
+      userPassword: {{ ldap_useradmin_password }}
+  when: __useradmin_check.rc != 0
+
+- name: Set scoped ACI on ou=people for hpc-useradmin (add/delete/write users)
+  ansible.builtin.command: >-
+    ldapmodify -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_user_base }}
+      changetype: modify
+      add: aci
+      aci: (targetattr="*")(version 3.0; acl "HPC useradmin - manage people"; allow(read,search,compare,add,delete,write)(userdn="ldap:///{{ ldap_useradmin_dn }}");)
+  register: __useradmin_aci_people
+  failed_when: __useradmin_aci_people.rc not in [0, 20]
+  changed_when: __useradmin_aci_people.rc == 0
+
+- name: Set scoped ACI on ou=groups for hpc-useradmin (memberUid only)
+  ansible.builtin.command: >-
+    ldapmodify -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_group_base }}
+      changetype: modify
+      add: aci
+      aci: (targetattr="memberUid")(version 3.0; acl "HPC useradmin - manage group membership"; allow(read,search,compare,write)(userdn="ldap:///{{ ldap_useradmin_dn }}");)
+  register: __useradmin_aci_groups
+  failed_when: __useradmin_aci_groups.rc not in [0, 20]
+  changed_when: __useradmin_aci_groups.rc == 0
+
+- name: Create /etc/hpc directory for UID counter
+  ansible.builtin.file:
+    path: "{{ hpc_uid_counter_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"

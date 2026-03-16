@@ -1,61 +1,100 @@
 #!/bin/bash
-# Create HPC user in OpenLDAP and Slurm accounting
-# Usage: create-hpc-user.sh <username> <group_name> <"Full Name">
+# create-hpc-user.sh — Tạo HPC user trong OpenLDAP, Slurm, gửi password qua email
+# Usage: create-hpc-user.sh <username> <group_name> "Full Name" <email>
+#
+# Requires (trong .env hoặc environment):
+#   LDAP_USERADMIN_PASSWORD  — password của cn=hpc-useradmin
+#   SMTP_HOST                — SMTP server (bắt buộc để gửi email)
+#   SMTP_PORT                — mặc định 587
+#   SMTP_USER                — tài khoản SMTP
+#   SMTP_PASSWORD            — password SMTP
+#   SMTP_FROM                — địa chỉ gửi (mặc định = SMTP_USER)
+
 set -euo pipefail
 
+# ─── Cấu hình LDAP ───────────────────────────────────────────────────────────
 LDAP_URI="{{ ldap_server_uri }}"
-MANAGER_DN="{{ ldap_directory_manager_dn }}"
-MANAGER_PASS="${LDAP_BIND_PASSWORD:?LDAP_BIND_PASSWORD not set}"
+ADMIN_DN="{{ ldap_useradmin_dn }}"
+ADMIN_PASS="${LDAP_USERADMIN_PASSWORD:?LDAP_USERADMIN_PASSWORD not set}"
 USER_BASE="{{ ldap_user_base }}"
 GROUP_BASE="{{ ldap_group_base }}"
-UID_MIN=10000
 
-USERNAME="${1:?Usage: $0 <username> <group_name> <Full Name>}"
-GROUP_NAME="${2:?}"
-GECOS="${3:?}"
+# ─── Monotonic UID counter ────────────────────────────────────────────────────
+UID_COUNTER="{{ hpc_uid_counter_path }}"
+
+# ─── Args ─────────────────────────────────────────────────────────────────────
+USERNAME="${1:?Usage: $0 <username> <group_name> <'Full Name'> <email>}"
+GROUP_NAME="${2:?Missing group_name}"
+GECOS="${3:?Missing full name}"
+EMAIL="${4:?Missing email}"
 HOME_DIR="/home/${USERNAME}"
 SHELL="/bin/bash"
 
-# Resolve group GID from LDAP
+# ─── Validate username: chữ thường, alphanumeric/dot/hyphen/underscore, 3–32 ký tự ──
+if ! [[ "$USERNAME" =~ ^[a-z][a-z0-9._-]{1,30}[a-z0-9]$|^[a-z]{1,3}$ ]]; then
+  echo "ERROR: username không hợp lệ — bắt đầu bằng chữ thường, chỉ [a-z0-9._-], 3–32 ký tự"
+  exit 1
+fi
+
+# ─── Validate email ───────────────────────────────────────────────────────────
+if ! [[ "$EMAIL" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
+  echo "ERROR: email không hợp lệ: '${EMAIL}'"
+  exit 1
+fi
+
+# ─── Kiểm tra user đã tồn tại ────────────────────────────────────────────────
+if ldapsearch -LLL -x -H "$LDAP_URI" \
+     -D "$ADMIN_DN" -w "$ADMIN_PASS" \
+     -b "uid=${USERNAME},${USER_BASE}" -s base "(objectClass=*)" dn 2>/dev/null \
+   | grep -q "^dn:"; then
+  echo "ERROR: user '${USERNAME}' đã tồn tại trong LDAP"
+  exit 1
+fi
+
+# ─── Resolve GID từ LDAP group ────────────────────────────────────────────────
 GID_NUM="$(ldapsearch -LLL -x -H "$LDAP_URI" \
-  -D "$MANAGER_DN" -w "$MANAGER_PASS" \
+  -D "$ADMIN_DN" -w "$ADMIN_PASS" \
   -b "cn=${GROUP_NAME},${GROUP_BASE}" gidNumber 2>/dev/null \
   | awk '/^gidNumber:/{print $2}')"
 
-[ -z "$GID_NUM" ] && { echo "ERROR: group '${GROUP_NAME}' not found in LDAP"; exit 1; }
-
-# Check user does not already exist
-ldapsearch -LLL -x -H "$LDAP_URI" \
-  -D "$MANAGER_DN" -w "$MANAGER_PASS" \
-  -b "uid=${USERNAME},${USER_BASE}" -s base dn 2>/dev/null \
-  | grep -q "^dn:" && { echo "ERROR: user '${USERNAME}' already exists"; exit 1; }
-
-# Auto-assign next available UID
-MAX_UID="$(ldapsearch -LLL -x -H "$LDAP_URI" \
-  -D "$MANAGER_DN" -w "$MANAGER_PASS" \
-  -b "$USER_BASE" "(uidNumber>=1)" uidNumber 2>/dev/null \
-  | awk '/^uidNumber:/{print $2}' | sort -n | tail -1)"
-
-if [ -z "$MAX_UID" ] || [ "$MAX_UID" -lt "$UID_MIN" ]; then
-  UID_NUM="$UID_MIN"
-else
-  UID_NUM="$(( MAX_UID + 1 ))"
+if [ -z "$GID_NUM" ]; then
+  echo "ERROR: group '${GROUP_NAME}' không tồn tại trong LDAP"
+  exit 1
 fi
 
-# Generate hashed password (prompts for password)
-echo -n "Password for ${USERNAME}: "
-read -rs RAW_PASS
-echo
-HASHED_PASS="$(python3 -c "
-import hashlib, base64, os
-p = '${RAW_PASS}'.encode()
-s = os.urandom(4)
-h = hashlib.sha1(p + s).digest()
-print('{SSHA}' + base64.b64encode(h + s).decode())
-")"
+# ─── Cấp phát UID: monotonic counter — không bao giờ tái sử dụng UID đã xóa ──
+mkdir -p "$(dirname "$UID_COUNTER")"
+exec 9>"${UID_COUNTER}.lock"
+flock -x 9
 
-# Build and add LDIF
-ldapadd -x -H "$LDAP_URI" -D "$MANAGER_DN" -w "$MANAGER_PASS" <<EOF
+if [ ! -f "$UID_COUNTER" ]; then
+  # Lần đầu chạy: seed từ max UID trong LDAP (hoặc 10000 nếu chưa có user nào)
+  MAX_LDAP="$(ldapsearch -LLL -x -H "$LDAP_URI" \
+    -D "$ADMIN_DN" -w "$ADMIN_PASS" \
+    -b "$USER_BASE" "(uidNumber>=10000)" uidNumber 2>/dev/null \
+    | awk '/^uidNumber:/{print $2}' | sort -n | tail -1)"
+  echo "${MAX_LDAP:-10000}" > "$UID_COUNTER"
+fi
+
+UID_NUM=$(( $(cat "$UID_COUNTER") + 1 ))
+echo "$UID_NUM" > "$UID_COUNTER"
+exec 9>&-   # release lock
+
+# ─── Tạo password 8 ký tự ngẫu nhiên (chữ hoa/thường + số + ký tự đặc biệt) ─
+RAW_PASS="$(LC_ALL=C tr -dc 'A-Za-z0-9!@#$%' < /dev/urandom | head -c 8)"
+
+# ─── Hash password với {SSHA512}: SHA-512 + random salt — thay thế SHA-1 cũ ──
+HASHED_PASS="$(python3 - "$RAW_PASS" <<'PYEOF'
+import hashlib, base64, os, sys
+password = sys.argv[1].encode('utf-8')
+salt = os.urandom(8)
+digest = hashlib.sha512(password + salt).digest()
+print('{SSHA512}' + base64.b64encode(digest + salt).decode())
+PYEOF
+)"
+
+# ─── Thêm user entry vào LDAP ─────────────────────────────────────────────────
+ldapadd -x -H "$LDAP_URI" -D "$ADMIN_DN" -w "$ADMIN_PASS" <<EOF
 dn: uid=${USERNAME},${USER_BASE}
 objectClass: top
 objectClass: account
@@ -68,29 +107,100 @@ gidNumber: ${GID_NUM}
 homeDirectory: ${HOME_DIR}
 loginShell: ${SHELL}
 gecos: ${GECOS}
+mail: ${EMAIL}
 userPassword: ${HASHED_PASS}
+shadowLastChange: 0
 EOF
 
-# Add to Slurm accounting
+# ─── Thêm memberUid vào group trong LDAP ─────────────────────────────────────
+ldapmodify -x -H "$LDAP_URI" -D "$ADMIN_DN" -w "$ADMIN_PASS" <<EOF
+dn: cn=${GROUP_NAME},${GROUP_BASE}
+changetype: modify
+add: memberUid
+memberUid: ${USERNAME}
+EOF
+
+# ─── Thêm vào Slurm accounting ───────────────────────────────────────────────
+SLURM_STATUS="sacctmgr not found"
 if command -v sacctmgr &>/dev/null; then
-  if sacctmgr -i add user "${USERNAME}" account="${GROUP_NAME}" cluster="{{ slurm_cluster_name }}" >/dev/null 2>&1; then
-    SLURM_STATUS="Success"
+  if sacctmgr -i add user "${USERNAME}" \
+       account="${GROUP_NAME}" cluster="{{ slurm_cluster_name }}" >/dev/null 2>&1; then
+    SLURM_STATUS="OK"
   else
-    SLURM_STATUS="Failed (run manually: sacctmgr -i add user ${USERNAME} account=${GROUP_NAME})"
+    SLURM_STATUS="FAILED — chạy thủ công: sacctmgr -i add user ${USERNAME} account=${GROUP_NAME}"
   fi
-else
-  SLURM_STATUS="Not skipped (sacctmgr not found)"
 fi
 
-echo -e "\n============================================="
-echo "           USER CREATION SUMMARY             "
-echo "============================================="
-echo " Username        : ${USERNAME}"
-echo " Full Name       : ${GECOS}"
-echo " Password        : ****** (Saved & Hashed)"
-echo " Group (Account) : ${GROUP_NAME} (GID: ${GID_NUM})"
-echo " UID Number      : ${UID_NUM}"
-echo " Home Directory  : ${HOME_DIR}"
-echo " Login Shell     : ${SHELL}"
-echo " Slurm Account   : ${SLURM_STATUS}"
-echo "============================================="
+# ─── Gửi email qua SMTP có auth ──────────────────────────────────────────────
+MAIL_STATUS="SKIPPED (SMTP_HOST not set)"
+if [ -n "${SMTP_HOST:-}" ]; then
+  MAIL_STATUS="$(python3 - \
+      "$EMAIL" "$USERNAME" "$RAW_PASS" "$GECOS" "$GROUP_NAME" "$UID_NUM" \
+      "{{ domain_name }}" <<'PYEOF'
+import smtplib, ssl, os, sys
+from email.message import EmailMessage
+
+to_addr  = sys.argv[1]
+username = sys.argv[2]
+password = sys.argv[3]
+fullname = sys.argv[4]
+group    = sys.argv[5]
+uid      = sys.argv[6]
+domain   = sys.argv[7]
+
+host      = os.environ['SMTP_HOST']
+port      = int(os.environ.get('SMTP_PORT', '587'))
+smtp_user = os.environ['SMTP_USER']
+smtp_pwd  = os.environ['SMTP_PASSWORD']
+from_addr = os.environ.get('SMTP_FROM', smtp_user)
+
+msg = EmailMessage()
+msg['Subject'] = f'[HPC] Tài khoản HPC đã được tạo — {username}'
+msg['From']    = from_addr
+msg['To']      = to_addr
+msg.set_content(f"""\
+Xin chào {fullname},
+
+Tài khoản HPC cluster của bạn đã được tạo thành công.
+
+  Username  : {username}
+  Password  : {password}  ← Đổi mật khẩu sau lần đăng nhập đầu tiên
+  Group     : {group}
+  UID       : {uid}
+
+Cách đăng nhập:
+  SSH (terminal) : ssh {username}@login01.{domain}
+  GUI (X2Go)     : kết nối tới login01.{domain}, session type XFCE
+
+Hướng dẫn sử dụng: liên hệ Admin hoặc xem tài liệu User Guide.
+
+Trân trọng,
+HPC Admin Team
+""")
+
+ctx = ssl.create_default_context()
+with smtplib.SMTP(host, port) as smtp:
+    smtp.ehlo()
+    smtp.starttls(context=ctx)
+    smtp.login(smtp_user, smtp_pwd)
+    smtp.send_message(msg)
+print('OK')
+PYEOF
+  )" || MAIL_STATUS="FAILED — kiểm tra SMTP_* vars trong .env"
+fi
+
+# ─── Tóm tắt ─────────────────────────────────────────────────────────────────
+echo ""
+echo "================================================="
+echo "          USER CREATION SUMMARY"
+echo "================================================="
+echo " Username    : ${USERNAME}"
+echo " Full Name   : ${GECOS}"
+echo " Email       : ${EMAIL}"
+echo " Group       : ${GROUP_NAME} (GID: ${GID_NUM})"
+echo " UID         : ${UID_NUM}"
+echo " Home        : ${HOME_DIR}"
+echo " Password    : ${RAW_PASS}  <- This password is only shown here once."
+echo " Slurm       : ${SLURM_STATUS}"
+echo " Email       : ${MAIL_STATUS}"
+echo "================================================="

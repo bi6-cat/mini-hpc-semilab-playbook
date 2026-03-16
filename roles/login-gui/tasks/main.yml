@@ -12,6 +12,19 @@
       - xorg-x11-utils
     state: present
 
+- name: Configure SSH for Password Expiry and PAM
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+    validate: '/usr/sbin/sshd -t -f %s'
+  loop:
+    - { regexp: '^#?UsePAM', line: 'UsePAM yes' }
+    - { regexp: '^#?ChallengeResponseAuthentication', line: 'ChallengeResponseAuthentication yes' }
+    - { regexp: '^#?KbdInteractiveAuthentication', line: 'KbdInteractiveAuthentication yes' }
+  notify: restart sshd
+
 - name: Enable X11 forwarding in sshd
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
