@@ -16,44 +16,44 @@ cd ~/manual-login-tests
 
 ## 2) Submit các bài test
 
-Mặc định script để `-A stu -p regular`. Nếu user thuộc account khác, override khi submit.
+Mặc định script để `-A g_stu -p small`. Nếu user thuộc account khác, override khi submit.
 
 ```bash
 mkdir -p logs
 
 # Queue test (array)
-sbatch -A stu -p regular 01-queue-array.sbatch
+sbatch -A g_stu -p small 01-queue-array.sbatch
 
 # Multi task test
-sbatch -A stu -p regular 02-multi-task.sbatch
+sbatch -A g_stu -p small 02-multi-task.sbatch
 
 # CPU heavy
-sbatch -A stu -p regular 03-cpu-heavy.sbatch
+sbatch -A g_stu -p small 03-cpu-heavy.sbatch
 
 # Memory heavy
-sbatch -A stu -p regular 04-mem-heavy.sbatch
+sbatch -A g_stu -p small 04-mem-heavy.sbatch
 
 # IO heavy
-sbatch -A stu -p regular 05-io-heavy.sbatch
+sbatch -A g_stu -p small 05-io-heavy.sbatch
 ```
 
 Ví dụ cho giảng viên:
 
 ```bash
-sbatch -A lecture -p regular 03-cpu-heavy.sbatch
+sbatch -A g_lec -p small 03-cpu-heavy.sbatch
 ```
 
 ### Chạy tất cả bằng 1 lệnh
 
 ```bash
 chmod +x run-all.sh
-./run-all.sh stu regular
+./run-all.sh g_stu small
 ```
 
 Cho giảng viên:
 
 ```bash
-./run-all.sh lecture regular
+./run-all.sh g_lec small
 ```
 
 ## 3) Theo dõi kết quả
