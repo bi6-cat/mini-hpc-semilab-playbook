@@ -9,8 +9,7 @@
 - name: Validate required LDAP variables are present and non-empty
   ansible.builtin.assert:
     that:
-      - item in vars
-      - (vars[item] | string | length) > 0
+      - (lookup('vars', item, default='') | string | trim | length) > 0
     fail_msg: "Missing required LDAP variable: {{ item }}"
   loop: "{{ ldap_contract_required_vars }}"
   loop_control:

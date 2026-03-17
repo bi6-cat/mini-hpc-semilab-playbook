@@ -29,6 +29,7 @@ GECOS="${3:?Missing full name}"
 EMAIL="${4:?Missing email}"
 HOME_DIR="/home/${USERNAME}"
 SHELL="/bin/bash"
+SN="${GECOS##* }"   # họ = từ cuối của full name
 
 # ─── Validate username: chữ thường, alphanumeric/dot/hyphen/underscore, 3–32 ký tự ──
 if ! [[ "$USERNAME" =~ ^[a-z][a-z0-9._-]{1,30}[a-z0-9]$|^[a-z]{1,3}$ ]]; then
@@ -81,26 +82,18 @@ echo "$UID_NUM" > "$UID_COUNTER"
 exec 9>&-   # release lock
 
 # ─── Tạo password 8 ký tự ngẫu nhiên (chữ hoa/thường + số + ký tự đặc biệt) ─
-RAW_PASS="$(LC_ALL=C tr -dc 'A-Za-z0-9!@#$%' < /dev/urandom | head -c 8)"
-
-# ─── Hash password với {SSHA512}: SHA-512 + random salt — thay thế SHA-1 cũ ──
-HASHED_PASS="$(python3 - "$RAW_PASS" <<'PYEOF'
-import hashlib, base64, os, sys
-password = sys.argv[1].encode('utf-8')
-salt = os.urandom(8)
-digest = hashlib.sha512(password + salt).digest()
-print('{SSHA512}' + base64.b64encode(digest + salt).decode())
-PYEOF
-)"
+RAW_PASS="$(LC_ALL=C tr -dc 'A-Za-z0-9!@#$%' < /dev/urandom | head -c 8 || true)"
 
 # ─── Thêm user entry vào LDAP ─────────────────────────────────────────────────
+# Gửi plaintext — 389-DS tự hash theo passwordStorageScheme (PBKDF2-SHA512)
 ldapadd -x -H "$LDAP_URI" -D "$ADMIN_DN" -w "$ADMIN_PASS" <<EOF
 dn: uid=${USERNAME},${USER_BASE}
 objectClass: top
-objectClass: account
+objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
 cn: ${GECOS}
+sn: ${SN}
 uid: ${USERNAME}
 uidNumber: ${UID_NUM}
 gidNumber: ${GID_NUM}
@@ -108,8 +101,8 @@ homeDirectory: ${HOME_DIR}
 loginShell: ${SHELL}
 gecos: ${GECOS}
 mail: ${EMAIL}
-userPassword: ${HASHED_PASS}
-shadowLastChange: 0
+userPassword: ${RAW_PASS}
+shadowLastChange: $(( $(date +%s) / 86400 ))
 EOF
 
 # ─── Thêm memberUid vào group trong LDAP ─────────────────────────────────────
@@ -154,29 +147,143 @@ smtp_user = os.environ['SMTP_USER']
 smtp_pwd  = os.environ['SMTP_PASSWORD']
 from_addr = os.environ.get('SMTP_FROM', smtp_user)
 
-msg = EmailMessage()
-msg['Subject'] = f'[HPC] Tài khoản HPC đã được tạo — {username}'
-msg['From']    = from_addr
-msg['To']      = to_addr
-msg.set_content(f"""\
+plain = f"""\
 Xin chào {fullname},
 
-Tài khoản HPC cluster của bạn đã được tạo thành công.
+Tài khoản HPC Cluster của bạn đã được tạo thành công.
 
   Username  : {username}
-  Password  : {password}  ← Đổi mật khẩu sau lần đăng nhập đầu tiên
-  Group     : {group}
+  Password  : {password}
+  Nhóm      : {group}
   UID       : {uid}
 
-Cách đăng nhập:
-  SSH (terminal) : ssh {username}@login01.{domain}
-  GUI (X2Go)     : kết nối tới login01.{domain}, session type XFCE
+Vui lòng đổi mật khẩu ngay sau lần đăng nhập đầu tiên: passwd
 
-Hướng dẫn sử dụng: liên hệ Admin hoặc xem tài liệu User Guide.
+Cách đăng nhập:
+  SSH   : ssh {username}@login01.{domain}
+  X2Go  : login01.{domain}  |  session: XFCE
 
 Trân trọng,
-HPC Admin Team
-""")
+HPC Admin Team — {domain}
+"""
+
+html = f"""\
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HPC Account Created</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f8fafc;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f8fafc;padding:40px 10px">
+    <tr>
+      <td align="center">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:600px;background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.05);border:1px solid #e2e8f0">
+          
+          <tr>
+            <td style="background-color:#0f172a;padding:40px 40px 30px 40px;text-align:left">
+              <div style="display:inline-block;padding:8px 12px;background:rgba(255,255,255,0.1);border-radius:6px;margin-bottom:16px">
+                <span style="color:#3b82f6;font-weight:bold;font-size:12px;letter-spacing:2px;text-transform:uppercase">System Access</span>
+              </div>
+              <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;line-height:1.2">Chào mừng bạn đến với <br>HPC Cluster Service</h1>
+              <p style="margin:8px 0 0;color:#94a3b8;font-size:14px">{domain}</p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:40px">
+              <p style="margin:0 0 20px;font-size:16px;line-height:1.5;color:#334155">
+                Xin chào <strong>{fullname}</strong>, <br>
+                Tài khoản tính toán hiệu năng cao của bạn đã được khởi tạo thành công. Dưới đây là thông tin đăng nhập và hướng dẫn truy cập:
+              </p>
+
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f1f5f9;border-radius:8px;margin-bottom:24px">
+                <tr>
+                  <td style="padding:20px">
+                    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td style="padding-bottom:10px;color:#64748b;font-size:13px;width:100px">Username</td>
+                        <td style="padding-bottom:10px;color:#0f172a;font-family:'Courier New',Courier,monospace;font-weight:700;font-size:15px">{username}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding-bottom:10px;color:#64748b;font-size:13px">Password</td>
+                        <td style="padding-bottom:10px;color:#e11d48;font-family:'Courier New',Courier,monospace;font-weight:700;font-size:15px">{password}</td>
+                      </tr>
+                      <tr>
+                        <td style="border-top:1px solid #e2e8f0;padding:10px 0;color:#64748b;font-size:13px">Nhóm (Group)</td>
+                        <td style="border-top:1px solid #e2e8f0;padding:10px 0;color:#334155;font-size:14px">{group}</td>
+                      </tr>
+                      <tr>
+                        <td style="color:#64748b;font-size:13px">UID</td>
+                        <td style="color:#334155;font-size:14px">{uid}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <div style="background-color:#fff7ed;border:1px solid #ffedd5;border-radius:8px;padding:16px;margin-bottom:30px">
+                <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                  <tr>
+                    <td width="24" valign="top" style="color:#ea580c;font-size:18px">⚠️</td>
+                    <td style="padding-left:10px;color:#9a3412;font-size:13px;line-height:1.4">
+                      Vì lý do bảo mật, bạn <strong>bắt buộc phải thay đổi mật khẩu</strong> ngay trong lần đăng nhập đầu tiên thông qua lệnh <code>passwd</code>.
+                    </td>
+                  </tr>
+                </table>
+              </div>
+
+              <h3 style="margin:0 0 16px;font-size:15px;color:#0f172a;text-transform:uppercase;letter-spacing:0.5px">Hướng dẫn kết nối</h3>
+              
+              <div style="margin-bottom:12px;padding:15px;border:1px solid #e2e8f0;border-radius:8px">
+                <p style="margin:0 0 8px;font-size:12px;font-weight:bold;color:#64748b">TERMINAL (SSH)</p>
+                <code style="display:block;background:#27272a;color:#f4f4f5;padding:10px;border-radius:4px;font-size:13px">
+                  ssh {username}@login01.{domain}
+                </code>
+              </div>
+
+              <div style="padding:15px;border:1px solid #e2e8f0;border-radius:8px">
+                <p style="margin:0 0 4px;font-size:12px;font-weight:bold;color:#64748b">GIAO DIỆN ĐỒ HỌA (X2Go)</p>
+                <p style="margin:0;font-size:14px;color:#334155">
+                  Host: <span style="font-family:monospace">login01.{domain}</span> <br>
+                  Session: <span style="font-weight:bold;color:#3b82f6">XFCE</span>
+                </p>
+              </div>
+
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:0 40px 40px 40px">
+              <p style="margin:0 0 20px;font-size:13px;color:#94a3b8;line-height:1.5;text-align:center">
+                Nếu gặp khó khăn, vui lòng truy cập <a href="#" style="color:#3b82f6;text-decoration:none">Tài liệu hướng dẫn</a> hoặc liên hệ quản trị viên qua hệ thống Ticket.
+              </p>
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border-top:1px solid #f1f5f9;padding-top:20px">
+                <tr>
+                  <td style="text-align:center;color:#cbd5e1;font-size:12px">
+                    &copy; 2026 HPC Admin Team &bull; {domain}<br>
+                    Đây là email tự động, vui lòng không phản hồi email này.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+"""
+
+msg = EmailMessage()
+msg['Subject'] = f'[HPC] Tài khoản HPC Cluster — {username}@{domain}'
+msg['From']    = from_addr
+msg['To']      = to_addr
+msg.set_content(plain)
+msg.add_alternative(html, subtype='html')
 
 ctx = ssl.create_default_context()
 with smtplib.SMTP(host, port) as smtp:

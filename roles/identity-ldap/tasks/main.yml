@@ -98,6 +98,16 @@
     -f {{ identity_ldap_base_ldif_path }}
   when: ldap_base_check.rc != 0
 
+- name: Check if user groups exist
+  ansible.builtin.command: >-
+    ldapsearch -LLL -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -b "cn={{ user_groups[0].name }},{{ ldap_group_base }}" -s base "(objectClass=*)" dn
+  register: ldap_groups_check
+  changed_when: false
+  failed_when: false
+
 - name: Seed user groups (skip existing entries)
   ansible.builtin.command: >-
     ldapadd -c -x -H {{ ldap_server_uri }}
@@ -107,6 +117,7 @@
   register: ldap_groups_add
   changed_when: "'adding new entry' in ldap_groups_add.stdout"
   failed_when: ldap_groups_add.rc not in [0, 68]
+  when: ldap_groups_check.rc != 0
 
 - name: Check if test user exists
   ansible.builtin.command: >-
@@ -194,6 +205,21 @@
   register: __useradmin_aci_groups
   failed_when: __useradmin_aci_groups.rc not in [0, 20]
   changed_when: __useradmin_aci_groups.rc == 0
+
+- name: Set read ACI on ou=groups for hpc-useradmin (all attributes)
+  ansible.builtin.command: >-
+    ldapmodify -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_group_base }}
+      changetype: modify
+      add: aci
+      aci: (targetattr="*")(version 3.0; acl "HPC useradmin - read group info"; allow(read,search,compare)(userdn="ldap:///{{ ldap_useradmin_dn }}");)
+  register: __useradmin_aci_groups_read
+  failed_when: __useradmin_aci_groups_read.rc not in [0, 20]
+  changed_when: __useradmin_aci_groups_read.rc == 0
 
 - name: Create /etc/hpc directory for UID counter
   ansible.builtin.file:

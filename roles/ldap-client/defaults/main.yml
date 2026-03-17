@@ -14,6 +14,8 @@ ldap_client_verify_user: "{{ ldap_test_user | default('hpc.test') }}"
 
 # Safe fallback — giá trị thực tế và các override per-node được set tại inventory/dev/group_vars/
 sssd_ldap_access_filter: "(uidNumber>=10000)"
+sssd_ldap_access_order: "filter"
+sssd_ldap_pwd_policy: "none"
 
 # Extend shared LDAP contract with client-specific requirements.
 ldap_contract_required_vars:
