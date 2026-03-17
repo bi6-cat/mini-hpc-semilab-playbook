@@ -48,7 +48,7 @@
     comment: "Slurm Workload Manager"
     state: present
 
-- name: "Create Slurm directories"
+- name: "Create Slurm persistent directories"
   file:
     path: "{{ item }}"
     state: directory
@@ -59,7 +59,18 @@
     - "{{ slurm_config_dir }}"
     - "{{ slurm_log_dir }}"
     - "{{ slurm_spool_dir }}"
-    - "{{ slurm_run_dir }}"
+
+- name: "Register Slurm run directory with systemd-tmpfiles"
+  copy:
+    dest: /etc/tmpfiles.d/slurm.conf
+    content: "d {{ slurm_run_dir }} 0755 {{ slurm_user }} {{ slurm_group }} -\n"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: "Apply tmpfiles.d to create Slurm run directory now"
+  command: systemd-tmpfiles --create /etc/tmpfiles.d/slurm.conf
+  changed_when: false
 
 - name: "Check Munge key on controller"
   ansible.builtin.stat:
@@ -142,8 +153,8 @@
     that:
       - munge_token.rc == 0
       - munge_decode.rc == 0
-      - "'STATUS:          Success (0)' in munge_decode.stdout"
-    fail_msg: "Munge authentication test failed"
+      - "'STATUS:' in munge_decode.stdout and 'Success (0)' in munge_decode.stdout"
+    fail_msg: "Munge authentication test failed (token rc={{ munge_token.rc }}, decode rc={{ munge_decode.rc }}). Output: {{ munge_decode.stdout }}"
     success_msg: "Munge authentication working correctly"
 
 

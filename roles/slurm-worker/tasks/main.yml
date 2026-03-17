@@ -79,6 +79,7 @@
   systemd:
     name: slurmd
   register: slurmd_status
+  changed_when: false
   failed_when: slurmd_status.status.ActiveState != 'active'
 
 - name: "Check Slurmd connection to controller"
