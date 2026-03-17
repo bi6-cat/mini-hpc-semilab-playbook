@@ -47,21 +47,25 @@
           systemd:
             name: munge
           register: munge_status
+          changed_when: false
 
         - name: "Check MariaDB service"
           systemd:
             name: mariadb
           register: mariadb_status
+          changed_when: false
 
         - name: "Check Slurmdbd service"
           systemd:
             name: slurmdbd
           register: slurmdbd_status
+          changed_when: false
 
         - name: "Check Slurmctld service"
           systemd:
             name: slurmctld
           register: slurmctld_status
+          changed_when: false
 
         - name: "Display services status"
           debug:

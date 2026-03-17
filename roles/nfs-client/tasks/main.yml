@@ -1,12 +1,12 @@
 ---
 # tasks file for nfs-client
 
-- name: Validate NFS mounts input
+- name: Validate NFS client config
   ansible.builtin.assert:
     that:
-      - nfs_mounts is defined
+      - nfs_client_enabled | default(true) | bool
       - nfs_mounts is iterable
-    fail_msg: "nfs_mounts must be a list (can be empty)"
+    fail_msg: "NFS client requires nfs_client_enabled=true and nfs_mounts as a list"
 
 - name: Validate each NFS mount entry
   ansible.builtin.assert:
@@ -29,12 +29,13 @@
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
-    owner: root
-    group: root
-    mode: '0755'
+    owner: "{{ nfs_client_mount_dir_owner }}"
+    group: "{{ nfs_client_mount_dir_group }}"
+    mode: "{{ nfs_client_mount_dir_mode }}"
   loop: "{{ nfs_mounts | default([]) }}"
   loop_control:
     label: "{{ item.path }}"
+  when: item.path not in (ansible_mounts | map(attribute='mount') | list)
 
 - name: Mount NFS shares and persist
   ansible.builtin.mount:

@@ -9,6 +9,8 @@
     pre_reboot_delay: "{{ reboot_pre_delay }}"
     post_reboot_delay: "{{ reboot_post_delay }}"
     test_command: "{{ reboot_test_command }}"
+  changed_when: false
+  
 
 - name: Wait for node to be reachable
   ansible.builtin.wait_for_connection:

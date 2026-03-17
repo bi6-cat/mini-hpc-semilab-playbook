@@ -6,12 +6,24 @@ nfs_exports:
   - path: "{{ nfs_home }}"
     clients: "{{ cluster_network_cidr }}"
     options: "rw,sync,no_subtree_check,no_root_squash"
+    owner: root
+    group: root
+    mode: "0755"
   - path: "{{ nfs_proj }}"
     clients: "{{ cluster_network_cidr }}"
-    options: "rw,sync,no_subtree_check,no_root_squash"
+    options: "rw,sync,no_subtree_check,root_squash"
+    owner: root
+    group: root
+    mode: "0770"
+    acl_groups_rw:
+      - g_stu
+      - g_lec
   - path: "{{ nfs_soft }}"
     clients: "{{ cluster_network_cidr }}"
-    options: "rw,sync,no_subtree_check,no_root_squash"
+    options: "ro,sync,no_subtree_check,root_squash"
+    owner: root
+    group: root
+    mode: "0755"
 
 # Disk quota - Group quota (shared pool)
 quota_enabled: true

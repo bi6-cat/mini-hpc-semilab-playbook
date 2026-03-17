@@ -23,7 +23,7 @@ nfs_mounts:
     opts: "rw,hard,intr,nfsvers=3,tcp,rsize=1048576,wsize=1048576"
   - path: "{{ nfs_soft }}"
     server: storage01
-    opts: "rw,hard,intr,nfsvers=3,tcp,rsize=1048576,wsize=1048576" 
+    opts: "ro,hard,intr,nfsvers=3,tcp,rsize=1048576,wsize=1048576" 
 
 # Monitoring
 prometheus_port: 9090

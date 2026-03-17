@@ -1,9 +1,14 @@
 ---
+nfs_client_enabled: true
+
 nfs_client_packages:
   - nfs-utils
 
 nfs_client_fstype: nfs
 nfs_client_default_opts: "rw,hard,intr,nfsvers=3,tcp"
+nfs_client_mount_dir_owner: root
+nfs_client_mount_dir_group: root
+nfs_client_mount_dir_mode: "0755"
 
 nfs_mounts: []
 # Example:

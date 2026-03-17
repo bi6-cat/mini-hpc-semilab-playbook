@@ -16,6 +16,7 @@
       - item.clients | length > 0
       - item.options is defined
       - item.options | length > 0
+      - item.acl_groups_rw is not defined or (item.acl_groups_rw is iterable and item.acl_groups_rw is not string)
     fail_msg: "Each nfs_exports item must define path, clients, options"
   loop: "{{ nfs_exports }}"
   loop_control:
@@ -37,12 +38,37 @@
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
-    owner: root
-    group: root
-    mode: '0755'
+    owner: "{{ item.owner | default(nfs_export_dir_owner) }}"
+    group: "{{ item.group | default(nfs_export_dir_group) }}"
+    mode: "{{ item.mode | default(nfs_export_dir_mode) }}"
   loop: "{{ nfs_exports }}"
   loop_control:
     label: "{{ item.path }}"
+
+- name: Grant rwx ACL to configured groups on export directories
+  ansible.posix.acl:
+    path: "{{ item.0.path }}"
+    etype: group
+    entity: "{{ item.1 }}"
+    permissions: rwx
+    state: present
+  loop: "{{ query('subelements', nfs_exports, 'acl_groups_rw', {'skip_missing': True}) }}"
+  loop_control:
+    label: "{{ item.0.path }} -> {{ item.1 }}"
+  when: nfs_export_acl_enabled | default(true) | bool
+
+- name: Set default rwx ACL for configured groups on export directories
+  ansible.posix.acl:
+    path: "{{ item.0.path }}"
+    etype: group
+    entity: "{{ item.1 }}"
+    permissions: rwx
+    default: true
+    state: present
+  loop: "{{ query('subelements', nfs_exports, 'acl_groups_rw', {'skip_missing': True}) }}"
+  loop_control:
+    label: "default {{ item.0.path }} -> {{ item.1 }}"
+  when: nfs_export_acl_enabled | default(true) | bool
 
 - name: Ensure exports.d directory exists
   ansible.builtin.file:

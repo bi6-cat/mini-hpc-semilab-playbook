@@ -64,11 +64,13 @@
           systemd:
             name: munge
           register: munge_status
+          changed_when: false
 
         - name: "Check Slurmd service"
           systemd:
             name: slurmd
           register: slurmd_status
+          changed_when: false
 
         - name: "Display services status"
           debug:
@@ -90,6 +92,7 @@
         - name: "Wait for node registration"
           pause:
             seconds: 5
+          changed_when: false
 
 - name: "Update Controller Node List"
   hosts: head
@@ -109,9 +112,12 @@
     - name: "Set nodes to IDLE state if in UNKNOWN"
       shell: |
         unknown_nodes="$(sinfo -N -h -o "%N" -t unknown)"
+        updated=""
         for node in $unknown_nodes; do
           scontrol update NodeName="$node" State=IDLE
+          updated="$updated $node"
         done
+        echo "$updated" | xargs
       register: node_update
       changed_when: node_update.stdout | trim != ''
       failed_when: false

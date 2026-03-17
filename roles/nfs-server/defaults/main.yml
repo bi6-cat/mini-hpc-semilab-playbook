@@ -5,12 +5,17 @@ nfs_server_packages:
   - nfs-utils
   - rpcbind
   - quota
+  - acl
 
 nfs_server_rpcbind_service: rpcbind
 nfs_server_service: nfs-server
 nfs_server_exports_dir: /etc/exports.d
 nfs_server_exports_file: /etc/exports.d/hpc.exports
 nfs_server_show_exports: true
+nfs_export_dir_owner: root
+nfs_export_dir_group: root
+nfs_export_dir_mode: "0755"
+nfs_export_acl_enabled: true
 
 nfs_exports: []
 # Example:
@@ -18,6 +23,10 @@ nfs_exports: []
 #   - path: /home
 #     clients: "*"
 #     options: "rw,sync,no_root_squash,no_subtree_check"
+#     owner: root   # optional, defaults to nfs_export_dir_owner
+#     group: root   # optional, defaults to nfs_export_dir_group
+#     mode: "0755" # optional, defaults to nfs_export_dir_mode
+#     acl_groups_rw: [g_stu, g_lec] # optional, grant rwx ACL to listed groups
 
 quota_enabled: false
 nfs_home: /home
