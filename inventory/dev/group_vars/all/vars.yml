@@ -42,7 +42,7 @@ slurm_log_dir: /var/log/slurm
 
 # Slurm common
 # OpenHPC 2.x cho Rocky Linux 8 (el8).
-# RPM nằm tại repos.openhpc.community 
+# RPM nằm tại repos.openhpc.community
 slurm_ohpc_release_url: "https://repos.openhpc.community/OpenHPC/2/EL_8/x86_64/ohpc-release-2-1.el8.x86_64.rpm"
 slurm_version: "23.02"
 slurm_packages:
@@ -214,10 +214,8 @@ ldap_server_uri: "ldap://127.0.0.1:{{ ldap_port }}"
 
 ldap_ds_instance: instance
 ldap_directory_manager_dn: "cn=Directory Manager"
-ldap_directory_manager_password: "{{ lookup('ansible.builtin.env', 'LDAP_BIND_PASSWORD') }}"
 
 ldap_bind_dn: "cn=admin,{{ ldap_base_dn }}"
-ldap_bind_password: "{{ lookup('ansible.builtin.env', 'LDAP_BIND_PASSWORD') }}"
 
 ldap_user_base: "ou=people,{{ ldap_base_dn }}"
 ldap_group_base: "ou=groups,{{ ldap_base_dn }}"
@@ -226,10 +224,10 @@ ldap_group_base: "ou=groups,{{ ldap_base_dn }}"
 # Quyền giới hạn: write ou=people, write memberUid trong ou=groups
 # KHÔNG dùng Directory Manager cho user scripts
 ldap_useradmin_dn: "cn=hpc-useradmin,{{ ldap_base_dn }}"
-ldap_useradmin_password: "{{ lookup('ansible.builtin.env', 'LDAP_USERADMIN_PASSWORD') }}"
 
 # UID counter — monotonic, không bao giờ tái sử dụng UID đã xóa
 hpc_uid_counter_path: /etc/hpc/uid-next
+identity_ldap_runtime_secrets_path: /etc/hpc/user-management-secrets.env
 
 ldap_id_use_start_tls: true          # StartTLS: mã hóa kết nối LDAP trên port 389
 ldap_tls_reqcert: allow              # Chấp nhận self-signed cert do 389-ds tự tạo
@@ -244,7 +242,6 @@ ldap_test_user_gid: "{{ ldap_test_group_gid }}"
 ldap_test_user_gecos: "HPC Test User"
 ldap_test_user_home: "/home/{{ ldap_test_user }}"
 ldap_test_user_shell: /bin/bash
-ldap_test_user_password: "{{ lookup('ansible.builtin.env', 'LDAP_TEST_USER_PASSWORD') | default(ldap_bind_password, true) }}"
 ldap_test_user_ssh_public_key: ""
 
 # SSH
@@ -290,7 +287,7 @@ user_groups:
     login_mem_gb: 4
     compute_access: false
 
-# Slurm account mapping for LDAP users 
+# Slurm account mapping for LDAP users
 slurm_user_account_mappings:
   - user: hpc.test
     account: g_stu

@@ -236,7 +236,24 @@
   failed_when: __self_password_aci.rc not in [0, 20]
   changed_when: __self_password_aci.rc == 0
 
-- name: Create /etc/hpc directory for UID counter
+- name: Create runtime secrets directory for user management scripts
+  ansible.builtin.file:
+    path: "{{ identity_ldap_runtime_secrets_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy vaulted runtime secrets for user management scripts
+  ansible.builtin.template:
+    src: user-management-secrets.env.j2
+    dest: "{{ identity_ldap_runtime_secrets_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Create UID counter directory
   ansible.builtin.file:
     path: "{{ hpc_uid_counter_path | dirname }}"
     state: directory

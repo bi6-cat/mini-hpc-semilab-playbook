@@ -2,9 +2,17 @@
 # delete-hpc-user.sh — Xóa HPC user khỏi OpenLDAP, groups, và Slurm accounting
 # Usage: delete-hpc-user.sh <username>
 #
-# Requires: LDAP_USERADMIN_PASSWORD trong environment
+# Requires runtime secrets file:
+#   {{ identity_ldap_runtime_secrets_path }}
 
 set -euo pipefail
+
+SECRETS_FILE="{{ identity_ldap_runtime_secrets_path }}"
+if [ -r "$SECRETS_FILE" ]; then
+  set -a
+  . "$SECRETS_FILE"
+  set +a
+fi
 
 # ─── Cấu hình LDAP ───────────────────────────────────────────────────────────
 LDAP_URI="{{ ldap_server_uri }}"

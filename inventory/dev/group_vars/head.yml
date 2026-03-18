@@ -8,10 +8,6 @@ sssd_ldap_access_filter: "(uidNumber<=0)"
 slurm_dbd_host: "localhost"
 slurm_dbd_port: 6819
 
-# Database (MariaDB)
-mariadb_root_password: "{{ lookup('ansible.builtin.env', 'MARIADB_ROOT_PASSWORD') }}"
-mariadb_slurm_password: "{{ lookup('ansible.builtin.env', 'MARIADB_SLURM_PASSWORD') }}"
-
 # NFS Server (Ko bật ở head)
 nfs_server_enabled: false
 
@@ -23,7 +19,7 @@ nfs_mounts:
     opts: "rw,hard,intr,nfsvers=3,tcp,rsize=1048576,wsize=1048576"
   - path: "{{ nfs_soft }}"
     server: storage01
-    opts: "ro,hard,intr,nfsvers=3,tcp,rsize=1048576,wsize=1048576" 
+    opts: "ro,hard,intr,nfsvers=3,tcp,rsize=1048576,wsize=1048576"
 
 # Monitoring
 prometheus_port: 9090
