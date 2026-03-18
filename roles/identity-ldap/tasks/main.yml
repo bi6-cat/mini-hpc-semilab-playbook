@@ -1,6 +1,262 @@
 ---
-- name: Phase 1 placeholder for LDAP identity management role
-  ansible.builtin.debug:
-    msg:
-      - "LDAP identity management scaffold is active."
-      - "Phase 3 will create users, groups, sudo rules, and SSH keys in LDAP."
+- name: Validate LDAP variable contract
+  ansible.builtin.include_role:
+    name: ldap-contract
+
+- name: Install LDAP client tools on server
+  ansible.builtin.dnf:
+    name: "{{ identity_ldap_packages }}"
+    state: present
+
+- name: Render base LDAP objects LDIF
+  ansible.builtin.template:
+    src: base.ldif.j2
+    dest: "{{ identity_ldap_base_ldif_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Render user groups LDIF
+  ansible.builtin.template:
+    src: groups.ldif.j2
+    dest: "{{ identity_ldap_groups_ldif_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+# Cho phép bind DN (dùng bởi SSSD) chỉ đọc cây LDAP.
+# allow(read,search,compare) — không cho phép ghi/xóa/modify.
+# create/delete-hpc-user.sh dùng cn=hpc-useradmin (scoped service account).
+
+- name: Read current ACIs on base domain
+  ansible.builtin.command: >-
+    ldapsearch -LLL -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -b "{{ ldap_base_dn }}" -s base "(objectClass=*)" aci
+  register: __aci_current
+  changed_when: false
+  failed_when: false
+
+- name: Remove overly-permissive ACI (allow all) if present
+  ansible.builtin.command: >-
+    ldapmodify -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_base_dn }}
+      changetype: modify
+      delete: aci
+      aci: (targetattr="*")(version 3.0; acl "Allow admin read"; allow(all)(userdn="ldap:///{{ ldap_bind_dn }}");)
+  register: __aci_delete
+  when: >-
+    __aci_current.rc == 0 and
+    'allow(all)' in __aci_current.stdout and
+    ldap_bind_dn in __aci_current.stdout
+  failed_when: __aci_delete.rc not in [0, 16]
+  changed_when: __aci_delete.rc == 0
+
+- name: Setup read-only ACI on base domain for bind DN
+  ansible.builtin.command: >-
+    ldapmodify -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_base_dn }}
+      changetype: modify
+      add: aci
+      aci: (targetattr="*")(version 3.0; acl "Allow admin read"; allow(read,search,compare)(userdn="ldap:///{{ ldap_bind_dn }}");)
+  register: __aci_add
+  failed_when: __aci_add.rc not in [0, 20]
+  changed_when: __aci_add.rc == 0
+
+- name: Render LDAP test user LDIF
+  ansible.builtin.template:
+    src: test-user.ldif.j2
+    dest: "{{ identity_ldap_test_user_ldif_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Check if base structure exists
+  ansible.builtin.command: >-
+    ldapsearch -LLL -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -b "{{ ldap_user_base }}" -s base "(objectClass=*)" dn
+  register: ldap_base_check
+  changed_when: false
+  failed_when: false
+
+- name: Seed base LDAP objects (OUs, bind account, hpc-users group)
+  ansible.builtin.command: >-
+    ldapadd -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -f {{ identity_ldap_base_ldif_path }}
+  when: ldap_base_check.rc != 0
+
+- name: Check if user groups exist
+  ansible.builtin.command: >-
+    ldapsearch -LLL -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -b "cn={{ user_groups[0].name }},{{ ldap_group_base }}" -s base "(objectClass=*)" dn
+  register: ldap_groups_check
+  changed_when: false
+  failed_when: false
+
+- name: Seed user groups (skip existing entries)
+  ansible.builtin.command: >-
+    ldapadd -c -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -f {{ identity_ldap_groups_ldif_path }}
+  register: ldap_groups_add
+  changed_when: "'adding new entry' in ldap_groups_add.stdout"
+  failed_when: ldap_groups_add.rc not in [0, 68]
+  when: ldap_groups_check.rc != 0
+
+- name: Check if test user exists
+  ansible.builtin.command: >-
+    ldapsearch -LLL -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -b "uid={{ ldap_test_user }},{{ ldap_user_base }}" -s base "(objectClass=*)" dn
+  register: ldap_test_user_check
+  changed_when: false
+  failed_when: false
+
+- name: Seed LDAP test user
+  ansible.builtin.command: >-
+    ldapadd -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -f {{ identity_ldap_test_user_ldif_path }}
+  when: ldap_test_user_check.rc != 0
+
+- name: Deploy user management scripts
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: '0755'
+  loop: "{{ identity_ldap_user_scripts }}"
+
+# --- Scoped service account: cn=hpc-useradmin ---
+# Dùng cho create/delete-hpc-user.sh thay vì Directory Manager.
+# Quyền giới hạn: full control trên ou=people, chỉ write memberUid trên ou=groups.
+
+- name: Check if hpc-useradmin account exists
+  ansible.builtin.command: >-
+    ldapsearch -LLL -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+    -b "{{ ldap_useradmin_dn }}" -s base "(objectClass=*)" dn
+  register: __useradmin_check
+  changed_when: false
+  failed_when: false
+
+- name: Create hpc-useradmin service account
+  ansible.builtin.command: >-
+    ldapadd -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_useradmin_dn }}
+      objectClass: top
+      objectClass: organizationalRole
+      objectClass: simpleSecurityObject
+      cn: hpc-useradmin
+      description: Scoped service account for HPC user management scripts
+      userPassword: {{ ldap_useradmin_password }}
+  when: __useradmin_check.rc != 0
+
+- name: Set scoped ACI on ou=people for hpc-useradmin (add/delete/write users)
+  ansible.builtin.command: >-
+    ldapmodify -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_user_base }}
+      changetype: modify
+      add: aci
+      aci: (targetattr="*")(version 3.0; acl "HPC useradmin - manage people"; allow(read,search,compare,add,delete,write)(userdn="ldap:///{{ ldap_useradmin_dn }}");)
+  register: __useradmin_aci_people
+  failed_when: __useradmin_aci_people.rc not in [0, 20]
+  changed_when: __useradmin_aci_people.rc == 0
+
+- name: Set scoped ACI on ou=groups for hpc-useradmin (memberUid only)
+  ansible.builtin.command: >-
+    ldapmodify -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_group_base }}
+      changetype: modify
+      add: aci
+      aci: (targetattr="memberUid")(version 3.0; acl "HPC useradmin - manage group membership"; allow(read,search,compare,write)(userdn="ldap:///{{ ldap_useradmin_dn }}");)
+  register: __useradmin_aci_groups
+  failed_when: __useradmin_aci_groups.rc not in [0, 20]
+  changed_when: __useradmin_aci_groups.rc == 0
+
+- name: Set read ACI on ou=groups for hpc-useradmin (all attributes)
+  ansible.builtin.command: >-
+    ldapmodify -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_group_base }}
+      changetype: modify
+      add: aci
+      aci: (targetattr="*")(version 3.0; acl "HPC useradmin - read group info"; allow(read,search,compare)(userdn="ldap:///{{ ldap_useradmin_dn }}");)
+  register: __useradmin_aci_groups_read
+  failed_when: __useradmin_aci_groups_read.rc not in [0, 20]
+  changed_when: __useradmin_aci_groups_read.rc == 0
+
+- name: Allow users to change their own password
+  ansible.builtin.command: >-
+    ldapmodify -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_user_base }}
+      changetype: modify
+      add: aci
+      aci: (targetattr="userPassword")(version 3.0; acl "Allow users to change own password"; allow(write)(userdn="ldap:///self");)
+  register: __self_password_aci
+  failed_when: __self_password_aci.rc not in [0, 20]
+  changed_when: __self_password_aci.rc == 0
+
+- name: Create runtime secrets directory for user management scripts
+  ansible.builtin.file:
+    path: "{{ identity_ldap_runtime_secrets_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy vaulted runtime secrets for user management scripts
+  ansible.builtin.template:
+    src: user-management-secrets.env.j2
+    dest: "{{ identity_ldap_runtime_secrets_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Create UID counter directory
+  ansible.builtin.file:
+    path: "{{ hpc_uid_counter_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"

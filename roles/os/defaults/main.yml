@@ -4,3 +4,9 @@ os_ssh_pubkey_path: /home/hpcadmin/.ssh/id_ed25519.pub
 os_ssh_authorized_users:
   - hpcadmin
   - ansible
+
+# Memory/swap tuning (per-host via inventory overrides)
+os_disable_swap: false
+os_disable_swap_persist: true
+os_tune_vm_swappiness: false
+os_vm_swappiness: 1

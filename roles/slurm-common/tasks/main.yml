@@ -6,21 +6,28 @@
   include_vars: "{{ ansible_os_family }}.yml"
   ignore_errors: true
 
-- name: "Install EPEL repository"
-  dnf:
-    name: epel-release
-    state: present
+- name: "Download OpenHPC release RPM"
+  ansible.builtin.get_url:
+    url: "{{ slurm_ohpc_release_url }}"
+    dest: /tmp/ohpc-release.rpm
+    mode: '0644'
 
-- name: "Install development tools"
-  dnf:
-    name: "@Development Tools"
+- name: "Install OpenHPC release package"
+  ansible.builtin.dnf:
+    name: /tmp/ohpc-release.rpm
     state: present
+    disable_gpg_check: true
 
 - name: "Install Munge packages"
   dnf:
     name:
       - munge
       - munge-libs
+    state: present
+
+- name: "Install Slurm common packages"
+  dnf:
+    name: "{{ slurm_packages }}"
     state: present
 
 - name: "Create Slurm group"
@@ -41,7 +48,7 @@
     comment: "Slurm Workload Manager"
     state: present
 
-- name: "Create Slurm directories"
+- name: "Create Slurm persistent directories"
   file:
     path: "{{ item }}"
     state: directory
@@ -52,84 +59,102 @@
     - "{{ slurm_config_dir }}"
     - "{{ slurm_log_dir }}"
     - "{{ slurm_spool_dir }}"
-    - "{{ slurm_run_dir }}"
 
-- name: "Generate Munge key on controller"
-  command: dd if=/dev/urandom bs=1 count=1024 of={{ munge_key_path }}
-  args:
-    creates: "{{ munge_key_path }}"
-  when: inventory_hostname == slurm_control_machine
+- name: "Register Slurm run directory with systemd-tmpfiles"
+  copy:
+    dest: /etc/tmpfiles.d/slurm.conf
+    content: "d {{ slurm_run_dir }} 0755 {{ slurm_user }} {{ slurm_group }} -\n"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: "Apply tmpfiles.d to create Slurm run directory now"
+  command: systemd-tmpfiles --create /etc/tmpfiles.d/slurm.conf
+  changed_when: false
+
+- name: "Check Munge key on controller"
+  ansible.builtin.stat:
+    path: "{{ munge_key_path }}"
+  register: munge_controller_key_stat
+  delegate_to: "{{ slurm_control_machine }}"
+  run_once: true
   become: yes
 
+- name: "Bootstrap Munge key on controller when missing"
+  ansible.builtin.copy:
+    dest: "{{ munge_key_path }}"
+    content: "{{ lookup('ansible.builtin.password', '/dev/null chars=ascii_letters,digits length=' ~ (munge_key_seed_length | string)) }}"
+    owner: "{{ munge_user }}"
+    group: "{{ munge_group }}"
+    mode: '0400'
+  delegate_to: "{{ slurm_control_machine }}"
+  run_once: true
+  become: yes
+  when: not munge_controller_key_stat.stat.exists
+
 - name: "Set Munge key permissions on controller"
-  file:
+  ansible.builtin.file:
     path: "{{ munge_key_path }}"
     owner: "{{ munge_user }}"
     group: "{{ munge_group }}"
     mode: '0400'
-  when: inventory_hostname == slurm_control_machine
+  delegate_to: "{{ slurm_control_machine }}"
+  run_once: true
+  become: yes
 
-- name: "Fetch Munge key from controller"
-  fetch:
+- name: "Read Munge key from controller"
+  ansible.builtin.slurp:
     src: "{{ munge_key_path }}"
-    dest: "/tmp/munge.key"
-    flat: yes
-  when: inventory_hostname == slurm_control_machine
+  register: munge_key_blob
+  delegate_to: "{{ slurm_control_machine }}"
+  run_once: true
   become: yes
 
 - name: "Distribute Munge key to all nodes"
-  copy:
-    src: "/tmp/munge.key"
+  ansible.builtin.copy:
+    content: "{{ munge_key_blob.content | b64decode }}"
     dest: "{{ munge_key_path }}"
     owner: "{{ munge_user }}"
     group: "{{ munge_group }}"
     mode: '0400'
-  when: inventory_hostname != slurm_control_machine
   notify: restart munge
+
+- name: "Cleanup legacy Munge staging file on control machine"
+  ansible.builtin.file:
+    path: "{{ munge_legacy_staging_path }}"
+    state: absent
+  delegate_to: localhost
+  run_once: true
+  become: false
+  when: munge_cleanup_legacy_staging | bool
 
 - name: "Enable and start Munge service"
   systemd:
-    name: munge
+    name: "{{ munge_service_name }}"
     enabled: yes
     state: started
 
-- name: "Test Munge authentication"
-  shell: |
-    munge -n | unmunge | grep -q STATUS
-  register: munge_test
-  failed_when: false
+- name: "Create a Munge token"
+  ansible.builtin.command: munge -n
+  register: munge_token
   changed_when: false
+  failed_when: false
+
+- name: "Decode Munge token"
+  ansible.builtin.command: unmunge
+  args:
+    stdin: "{{ munge_token.stdout }}"
+  register: munge_decode
+  changed_when: false
+  failed_when: false
 
 - name: "Verify Munge is working"
   assert:
     that:
-      - munge_test.rc == 0
-    fail_msg: "Munge authentication test failed"
+      - munge_token.rc == 0
+      - munge_decode.rc == 0
+      - "'STATUS:' in munge_decode.stdout and 'Success (0)' in munge_decode.stdout"
+    fail_msg: "Munge authentication test failed (token rc={{ munge_token.rc }}, decode rc={{ munge_decode.rc }}). Output: {{ munge_decode.stdout }}"
     success_msg: "Munge authentication working correctly"
 
-- name: "Configure firewall for Munge (on controller)"
-  firewalld:
-    port: "{{ item }}"
-    permanent: yes
-    state: enabled
-    immediate: yes
-  loop:
-    - "{{ slurm_slurmctld_port }}/tcp"
-    - "{{ slurm_slurmdbd_port }}/tcp"
-  when:
-    - inventory_hostname == slurm_control_machine
-    - ansible_facts.services['firewalld.service'] is defined
-    - ansible_facts.services['firewalld.service'].state == 'running'
-  ignore_errors: yes
 
-- name: "Configure firewall for Slurmd (on compute nodes)"
-  firewalld:
-    port: "{{ slurm_slurmd_port }}/tcp"
-    permanent: yes
-    state: enabled
-    immediate: yes
-  when:
-    - slurm_node_type == 'compute'
-    - ansible_facts.services['firewalld.service'] is defined
-    - ansible_facts.services['firewalld.service'].state == 'running'
-  ignore_errors: yes

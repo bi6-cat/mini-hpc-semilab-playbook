@@ -1,9 +1,19 @@
 ---
-# defaults file for nfs-client
+nfs_client_enabled: true
+
+nfs_client_packages:
+  - nfs-utils
+
+nfs_client_fstype: nfs
+nfs_client_default_opts: "rw,hard,intr,nfsvers=3,tcp"
+nfs_client_mount_dir_owner: root
+nfs_client_mount_dir_group: root
+nfs_client_mount_dir_mode: "0755"
 
 nfs_mounts: []
 # Example:
 # nfs_mounts:
 #   - path: /home
 #     server: storage01.local
+#     export_path: /home   # optional, defaults to path
 #     opts: "rw,hard,intr,nfsvers=3,tcp"

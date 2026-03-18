@@ -30,7 +30,7 @@
     timeout: 30
 
 - name: "Check if MariaDB root can connect without password"
-  command: mysql -u root -e "SELECT 1"
+  command: mysql --no-defaults -u root -e "SELECT 1"
   register: mariadb_nopass_check
   changed_when: false
   failed_when: false
@@ -38,7 +38,7 @@
 
 - name: "Set MariaDB root password (first-time setup)"
   command: >
-    mysql -u root -e
+    mysql --no-defaults -u root -e
     "ALTER USER 'root'@'localhost' IDENTIFIED BY '{{ mariadb_root_password }}'; FLUSH PRIVILEGES;"
   when: mariadb_nopass_check.rc == 0
   no_log: true
@@ -61,7 +61,6 @@
     login_user: root
     login_password: "{{ mariadb_root_password }}"
     state: absent
-  ignore_errors: yes
 
 - name: "Remove MariaDB test database"
   community.mysql.mysql_db:
@@ -69,7 +68,6 @@
     login_user: root
     login_password: "{{ mariadb_root_password }}"
     state: absent
-  ignore_errors: yes
 
 - name: "Create Slurm accounting database"
   community.mysql.mysql_db:
@@ -173,6 +171,7 @@
 - name: "Wait for Slurm cluster to initialize"
   pause:
     seconds: 5
+  changed_when: false
 
 - name: "Add cluster to Slurm accounting"
   command: >
@@ -191,6 +190,40 @@
   register: add_account
   failed_when: false
   changed_when: "'Adding Account' in add_account.stdout"
+
+- name: "Create Slurm user associations (for LDAP users)"
+  command: >
+    sacctmgr -i add user name={{ item.user }}
+    account={{ item.account }}
+    cluster={{ slurm_cluster_name }}
+    defaultaccount={{ item.account }}
+  loop: "{{ slurm_user_account_mappings }}"
+  register: add_user_assoc
+  failed_when: false
+  changed_when: "'Adding User' in add_user_assoc.stdout"
+  when: slurm_user_account_mappings | length > 0
+
+- name: "Grant Slurm operator rights to admin user"
+  block:
+    - name: "Create admin account in Slurm"
+      command: >
+        sacctmgr -i add account admin
+        Cluster={{ slurm_cluster_name }}
+        Description="HPC Admin Account"
+        Organization="{{ cluster_name }}"
+      register: slurm_admin_account
+      failed_when: false
+      changed_when: "'Adding Account' in slurm_admin_account.stdout"
+
+    - name: "Add admin user to Slurm with AdminLevel=Admin"
+      command: >
+        sacctmgr -i add user {{ admin_user }}
+        account=admin
+        cluster={{ slurm_cluster_name }}
+        AdminLevel=Admin
+      register: slurm_admin_grant
+      failed_when: false
+      changed_when: "'Adding User' in slurm_admin_grant.stdout"
 
 - name: "Verify Slurm controller status"
   command: scontrol ping

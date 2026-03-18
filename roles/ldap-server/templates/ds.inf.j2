@@ -1,0 +1,18 @@
+[general]
+config_version = 2
+full_machine_name = {{ ldap_server_host }}
+strict_host_checking = False
+start = True
+
+[slapd]
+instance_name = {{ ldap_ds_instance }}
+root_dn = {{ ldap_directory_manager_dn }}
+root_password = {{ ldap_directory_manager_password }}
+port = {{ ldap_port }}
+secure_port = {{ ldap_secure_port }}
+self_sign_cert = True
+
+[backend-userroot]
+create_suffix_entry = True
+sample_entries = no
+suffix = {{ ldap_base_dn }}

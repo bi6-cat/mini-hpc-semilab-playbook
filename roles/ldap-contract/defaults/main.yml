@@ -1,0 +1,9 @@
+---
+# Shared LDAP variable contract. Individual roles can append/override this list.
+ldap_contract_required_vars:
+  - ldap_base_dn
+  - ldap_server_uri
+  - ldap_directory_manager_dn
+  - ldap_directory_manager_password
+  - ldap_bind_dn
+  - ldap_bind_password

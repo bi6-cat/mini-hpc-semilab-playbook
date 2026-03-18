@@ -7,12 +7,12 @@
     - name: Test connectivity
       ansible.builtin.ping:
 
-    - name: Verify Rocky Linux 8
+    - name: Verify OS distribution
       ansible.builtin.assert:
         that:
-          - ansible_distribution == "Rocky"
+          - ansible_distribution in ["Rocky", "AlmaLinux"]
           - ansible_distribution_major_version == "8"
-        fail_msg: "Requires Rocky Linux 8"
+        fail_msg: "Requires Rocky Linux 8 or AlmaLinux 8"
 
   roles:
     - os

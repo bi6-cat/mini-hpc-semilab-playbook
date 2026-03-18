@@ -1,0 +1,16 @@
+---
+- name: Validate LDAP contract list is configured
+  ansible.builtin.assert:
+    that:
+      - ldap_contract_required_vars is defined
+      - ldap_contract_required_vars | length > 0
+    fail_msg: "ldap_contract_required_vars must contain at least one variable name"
+
+- name: Validate required LDAP variables are present and non-empty
+  ansible.builtin.assert:
+    that:
+      - (lookup('vars', item, default='') | string | trim | length) > 0
+    fail_msg: "Missing required LDAP variable: {{ item }}"
+  loop: "{{ ldap_contract_required_vars }}"
+  loop_control:
+    label: "{{ item }}"

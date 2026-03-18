@@ -74,14 +74,30 @@
     - quota_fstype == 'xfs'
     - quota_lsof.rc != 0 or quota_lsof.stdout | length == 0
   register: quota_umount
-  changed_when: true
+  changed_when: quota_umount.rc == 0
+  failed_when: false
+
+- name: Warn if unmount failed (XFS busy)
+  ansible.builtin.debug:
+    msg:
+      - "WARNING: Failed to unmount {{ quota_mount_target }} (rc={{ quota_umount.rc }})"
+      - "stderr: {{ quota_umount.stderr | default('') }}"
+      - "Quota options in /etc/fstab will still be persisted (if missing)."
+      - "Reboot storage node, then re-run quota tasks to activate quotas."
+  when:
+    - quota_needs_remount | bool
+    - quota_fstype == 'xfs'
+    - quota_lsof.rc != 0 or quota_lsof.stdout | length == 0
+    - quota_umount is defined
+    - quota_umount.rc != 0
 
 - name: Remount with quota options (XFS)
   ansible.builtin.command: "mount {{ quota_mount_target }}"
   when:
     - quota_needs_remount | bool
     - quota_fstype == 'xfs'
-    - quota_umount is changed
+    - quota_umount is defined
+    - quota_umount.rc == 0
   register: quota_mount
   changed_when: true
 

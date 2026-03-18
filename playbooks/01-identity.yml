@@ -7,19 +7,20 @@
     - name: Verify network connectivity
       ansible.builtin.ping:
 
-    - name: Check hostname resolution
-      ansible.builtin.command: hostname -f
-      register: fqdn_check
-      changed_when: false
+    - name: Verify OS distribution
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution in ["Rocky", "AlmaLinux"]
+          - ansible_distribution_major_version == "8"
+        fail_msg: "Requires Rocky Linux 8 or AlmaLinux 8"
 
   roles:
     - ldap-server
     - identity-ldap
-    - user-privacy
 
   post_tasks:
     - name: LDAP server status
-      ansible.builtin.command: systemctl is-active dirsrv@instance
+      ansible.builtin.command: systemctl is-active dirsrv@{{ ldap_ds_instance }}
       register: ldap_status
       changed_when: false
       failed_when: false
@@ -29,7 +30,7 @@
         msg: "LDAP service state: {{ ldap_status.stdout | default('unknown') }}"
 
 - name: 01 - Setup LDAP Clients
-  hosts: storage,login,compute
+  hosts: head,storage,login,compute
   gather_facts: true
   become: true
   serial: 1
@@ -37,17 +38,16 @@
   pre_tasks:
     - name: Wait for LDAP server
       ansible.builtin.wait_for:
-        host: "{{ groups['head'][0] }}.{{ domain_name }}"
-        port: 636
+        host: "{{ ldap_server_host }}"
+        port: "{{ ldap_port }}"
         timeout: 300
 
   roles:
     - ldap-client
-    - user-privacy
 
   post_tasks:
-    - name: Verify SSSD can resolve admin user
-      ansible.builtin.command: id {{ admin_user }}
+    - name: Verify SSSD can resolve LDAP test user
+      ansible.builtin.command: id {{ ldap_test_user }}
       register: ldap_sssd_test
       changed_when: false
       failed_when: false
@@ -56,4 +56,4 @@
       ansible.builtin.debug:
         msg:
           - "-- {{ inventory_hostname }} configured for LDAP"
-          - "-- SSSD: {{ 'OK' if ldap_sssd_test.rc == 0 else 'Pending' }}"
+          - "-- SSSD lookup: {{ 'OK' if ldap_sssd_test.rc == 0 else 'Pending' }}"

@@ -1,26 +1,49 @@
 ---
 # tasks file for nfs-client
 
+- name: Validate NFS client config
+  ansible.builtin.assert:
+    that:
+      - nfs_client_enabled | default(true) | bool
+      - nfs_mounts is iterable
+    fail_msg: "NFS client requires nfs_client_enabled=true and nfs_mounts as a list"
+
+- name: Validate each NFS mount entry
+  ansible.builtin.assert:
+    that:
+      - item.path is defined
+      - item.path | length > 0
+      - item.server is defined
+      - item.server | length > 0
+    fail_msg: "Each nfs_mounts item must define path and server"
+  loop: "{{ nfs_mounts | default([]) }}"
+  loop_control:
+    label: "{{ item.path | default('missing-path') }}"
+
 - name: Install NFS client packages
   ansible.builtin.dnf:
-    name:
-      - nfs-utils
+    name: "{{ nfs_client_packages }}"
     state: present
 
 - name: Ensure mount points exist
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
-    owner: root
-    group: root
-    mode: '0755'
+    owner: "{{ nfs_client_mount_dir_owner }}"
+    group: "{{ nfs_client_mount_dir_group }}"
+    mode: "{{ nfs_client_mount_dir_mode }}"
   loop: "{{ nfs_mounts | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: item.path not in (ansible_mounts | map(attribute='mount') | list)
 
 - name: Mount NFS shares and persist
   ansible.builtin.mount:
     path: "{{ item.path }}"
-    src: "{{ item.server }}:{{ item.path }}"
-    fstype: nfs
-    opts: "{{ item.opts | default('rw,hard,intr,nfsvers=3,tcp') }}"
+    src: "{{ item.server }}:{{ item.export_path | default(item.path) }}"
+    fstype: "{{ nfs_client_fstype }}"
+    opts: "{{ item.opts | default(nfs_client_default_opts) }}"
     state: mounted
   loop: "{{ nfs_mounts | default([]) }}"
+  loop_control:
+    label: "{{ item.server }}:{{ item.export_path | default(item.path) }} -> {{ item.path }}"

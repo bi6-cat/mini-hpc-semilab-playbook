@@ -1,6 +1,4 @@
 ---
-# tasks file for nfs-server
-
 - name: Validate NFS exports config
   ansible.builtin.assert:
     that:
@@ -9,12 +7,24 @@
       - nfs_exports | length > 0
     fail_msg: "NFS server requires nfs_server_enabled=true and nfs_exports list"
 
+- name: Validate each NFS export entry
+  ansible.builtin.assert:
+    that:
+      - item.path is defined
+      - item.path | length > 0
+      - item.clients is defined
+      - item.clients | length > 0
+      - item.options is defined
+      - item.options | length > 0
+      - item.acl_groups_rw is not defined or (item.acl_groups_rw is iterable and item.acl_groups_rw is not string)
+    fail_msg: "Each nfs_exports item must define path, clients, options"
+  loop: "{{ nfs_exports }}"
+  loop_control:
+    label: "{{ item.path | default('missing-path') }}"
+
 - name: Install NFS server packages
   ansible.builtin.dnf:
-    name:
-      - nfs-utils
-      - rpcbind
-      - quota
+    name: "{{ nfs_server_packages }}"
     state: present
 
 - name: Configure filesystem quotas (NFS server)
@@ -28,43 +38,74 @@
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
+    owner: "{{ item.owner | default(nfs_export_dir_owner) }}"
+    group: "{{ item.group | default(nfs_export_dir_group) }}"
+    mode: "{{ item.mode | default(nfs_export_dir_mode) }}"
+  loop: "{{ nfs_exports }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Grant rwx ACL to configured groups on export directories
+  ansible.posix.acl:
+    path: "{{ item.0.path }}"
+    etype: group
+    entity: "{{ item.1 }}"
+    permissions: rwx
+    state: present
+  loop: "{{ query('subelements', nfs_exports, 'acl_groups_rw', {'skip_missing': True}) }}"
+  loop_control:
+    label: "{{ item.0.path }} -> {{ item.1 }}"
+  when: nfs_export_acl_enabled | default(true) | bool
+
+- name: Set default rwx ACL for configured groups on export directories
+  ansible.posix.acl:
+    path: "{{ item.0.path }}"
+    etype: group
+    entity: "{{ item.1 }}"
+    permissions: rwx
+    default: true
+    state: present
+  loop: "{{ query('subelements', nfs_exports, 'acl_groups_rw', {'skip_missing': True}) }}"
+  loop_control:
+    label: "default {{ item.0.path }} -> {{ item.1 }}"
+  when: nfs_export_acl_enabled | default(true) | bool
+
+- name: Ensure exports.d directory exists
+  ansible.builtin.file:
+    path: "{{ nfs_server_exports_dir }}"
+    state: directory
     owner: root
     group: root
     mode: '0755'
-  loop: "{{ nfs_exports }}"
 
-- name: Configure /etc/exports
-  ansible.builtin.blockinfile:
-    path: /etc/exports
-    create: true
-    marker: "# {mark} ANSIBLE MANAGED - HPC NFS EXPORTS"
-    block: |
-      {% for e in nfs_exports %}
-      {{ e.path }} {{ e.clients }}({{ e.options }})
-      {% endfor %}
-  notify: Apply NFS exports
+- name: Render managed NFS exports file
+  ansible.builtin.template:
+    src: hpc.exports.j2
+    dest: "{{ nfs_server_exports_file }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: apply nfs exports
 
 - name: Enable and start rpcbind
   ansible.builtin.systemd:
-    name: rpcbind
+    name: "{{ nfs_server_rpcbind_service }}"
     enabled: true
     state: started
 
 - name: Enable and start NFS server
   ansible.builtin.systemd:
-    name: nfs-server
+    name: "{{ nfs_server_service }}"
     enabled: true
     state: started
-
-- name: Apply NFS export table
-  ansible.builtin.command: exportfs -ra
-  changed_when: false
 
 - name: Show exports
   ansible.builtin.command: exportfs -v
   register: exportfs_out
   changed_when: false
+  when: nfs_server_show_exports | bool
 
 - name: Export status
   ansible.builtin.debug:
     var: exportfs_out.stdout_lines
+  when: nfs_server_show_exports | bool

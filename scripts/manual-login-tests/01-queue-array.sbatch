@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J qburst_manual
-#SBATCH -p regular
-#SBATCH -A stu
+#SBATCH -p small
+#SBATCH -A g_stu
 #SBATCH --array=1-12%3
 #SBATCH -N 1
 #SBATCH -n 1

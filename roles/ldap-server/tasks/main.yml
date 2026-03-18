@@ -1,6 +1,56 @@
 ---
-- name: Phase 1 placeholder for LDAP server role
-  ansible.builtin.debug:
-    msg:
-      - "LDAP server role scaffold is active."
-      - "Phase 2 will install/configure the real LDAP server and TLS."
+- name: Validate LDAP variable contract
+  ansible.builtin.include_role:
+    name: ldap-contract
+
+- name: Check if 389-ds module is already enabled
+  ansible.builtin.command: dnf -q module list --enabled 389-ds
+  register: ds_module_enabled
+  failed_when: false
+  changed_when: false
+
+- name: Clean DNF cache
+  ansible.builtin.command: dnf clean all
+  when: ds_module_enabled.rc != 0 or (ldap_server_module_stream not in ds_module_enabled.stdout)
+
+- name: Reset 389-ds module
+  ansible.builtin.command: dnf module reset 389-ds -y
+  when: ds_module_enabled.rc != 0 or (ldap_server_module_stream not in ds_module_enabled.stdout)
+
+- name: Enable configured 389-ds stream
+  ansible.builtin.command: dnf module enable 389-ds:{{ ldap_server_module_stream }} -y
+  when: ds_module_enabled.rc != 0 or (ldap_server_module_stream not in ds_module_enabled.stdout)
+
+- name: Install 389-ds server and client
+  ansible.builtin.dnf:
+    name: "{{ ldap_server_packages }}"
+    state: present
+
+- name: Render DS instance config
+  ansible.builtin.template:
+    src: ds.inf.j2
+    dest: "{{ ldap_server_ds_inf_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Check if DS instance exists
+  ansible.builtin.stat:
+    path: "{{ ldap_server_instance_path }}"
+  register: ldap_ds_instance_stat
+
+- name: Create DS instance
+  ansible.builtin.command: dscreate from-file {{ ldap_server_ds_inf_path }}
+  when: not ldap_ds_instance_stat.stat.exists
+
+- name: Ensure LDAP service is enabled and started
+  ansible.builtin.systemd:
+    name: "{{ ldap_server_service_name }}"
+    state: started
+    enabled: true
+
+- name: Wait for LDAP TCP port
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ ldap_port }}"
+    timeout: 60

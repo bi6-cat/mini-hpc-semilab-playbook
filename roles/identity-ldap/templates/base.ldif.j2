@@ -1,0 +1,23 @@
+dn: {{ ldap_user_base }}
+objectClass: top
+objectClass: organizationalUnit
+ou: people
+
+dn: {{ ldap_group_base }}
+objectClass: top
+objectClass: organizationalUnit
+ou: groups
+
+dn: {{ ldap_bind_dn }}
+objectClass: top
+objectClass: organizationalRole
+objectClass: simpleSecurityObject
+cn: admin
+description: LDAP bind account
+userPassword: {{ ldap_bind_password }}
+
+dn: cn={{ ldap_test_group }},{{ ldap_group_base }}
+objectClass: top
+objectClass: posixGroup
+cn: {{ ldap_test_group }}
+gidNumber: {{ ldap_test_group_gid }}

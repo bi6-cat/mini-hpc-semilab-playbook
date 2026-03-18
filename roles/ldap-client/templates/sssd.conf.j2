@@ -1,0 +1,30 @@
+[sssd]
+config_file_version = 2
+services = nss, pam, ssh
+domains = default
+
+[domain/default]
+id_provider = ldap
+auth_provider = ldap
+chpass_provider = ldap
+cache_credentials = true
+ldap_uri = {{ ldap_uri }}
+ldap_search_base = {{ ldap_base_dn }}
+ldap_user_search_base = {{ ldap_user_base }}
+ldap_group_search_base = {{ ldap_group_base }}
+ldap_default_bind_dn = {{ ldap_bind_dn }}
+ldap_default_authtok_type = password
+ldap_default_authtok = {{ ldap_bind_password }}
+ldap_id_use_start_tls = {{ ldap_id_use_start_tls | ternary('true', 'false') }}
+ldap_tls_reqcert = {{ ldap_tls_reqcert }}
+ldap_user_ssh_public_key = {{ ldap_ssh_public_key_attr }}
+enumerate = false
+access_provider = ldap
+ldap_access_order = {{ sssd_ldap_access_order }}
+ldap_pwd_policy = {{ sssd_ldap_pwd_policy }}
+ldap_access_filter = {{ sssd_ldap_access_filter }}
+fallback_homedir = /home/%u
+default_shell = /bin/bash
+
+[nss]
+homedir_substring = /home

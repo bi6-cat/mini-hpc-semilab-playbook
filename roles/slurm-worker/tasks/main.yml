@@ -8,7 +8,8 @@
     regexp: '^#?X11UseLocalhost'
     line: 'X11UseLocalhost no'
     state: present
-  notify: Restart sshd
+  notify: restart sshd
+  when: slurm_worker_enable_x11use_localhost_no | bool
 
 - name: "Install Slurm worker packages"
   dnf:
@@ -59,20 +60,6 @@
   when: not cgroup_conf_content.failed
   notify: restart slurmd
 
-# ==================== Cgroups v2 Configuration ====================
-
-- name: "Check if cgroups v2 is enabled"
-  stat:
-    path: /sys/fs/cgroup/cgroup.controllers
-  register: cgroup_v2
-
-- name: "Enable cgroups v2 controllers for Slurm"
-  shell: |
-    echo "+cpu +memory +pids" > /sys/fs/cgroup/cgroup.subtree_control
-  when: cgroup_v2.stat.exists
-  failed_when: false
-  changed_when: false
-
 # ==================== Enable and Start Slurmd ====================
 
 - name: "Enable and start Slurmd service"
@@ -92,15 +79,18 @@
   systemd:
     name: slurmd
   register: slurmd_status
+  changed_when: false
   failed_when: slurmd_status.status.ActiveState != 'active'
 
 - name: "Check Slurmd connection to controller"
-  shell: |
-    systemctl status slurmd | grep -i "registered"
-  register: slurmd_registered
-  failed_when: false
+  ansible.builtin.command: scontrol ping
+  register: slurm_controller_ping
+  delegate_to: "{{ slurm_control_machine }}"
   changed_when: false
+  failed_when: false
 
 - name: "Display Slurmd status"
   debug:
-    msg: "Slurmd is {{ slurmd_status.status.ActiveState }} and running on port {{ slurm_slurmd_port }}"
+    msg:
+      - "Slurmd is {{ slurmd_status.status.ActiveState }} and running on port {{ slurm_slurmd_port }}"
+      - "Controller ping: {{ slurm_controller_ping.stdout | default('unavailable') }}"

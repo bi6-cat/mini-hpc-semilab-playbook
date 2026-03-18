@@ -1,0 +1,94 @@
+#!/bin/bash
+# delete-hpc-user.sh — Xóa HPC user khỏi OpenLDAP, groups, và Slurm accounting
+# Usage: delete-hpc-user.sh <username>
+#
+# Requires runtime secrets file:
+#   {{ identity_ldap_runtime_secrets_path }}
+
+set -euo pipefail
+
+SECRETS_FILE="{{ identity_ldap_runtime_secrets_path }}"
+if [ -r "$SECRETS_FILE" ]; then
+  set -a
+  . "$SECRETS_FILE"
+  set +a
+fi
+
+# ─── Cấu hình LDAP ───────────────────────────────────────────────────────────
+LDAP_URI="{{ ldap_server_uri }}"
+ADMIN_DN="{{ ldap_useradmin_dn }}"
+ADMIN_PASS="${LDAP_USERADMIN_PASSWORD:?LDAP_USERADMIN_PASSWORD not set}"
+USER_BASE="{{ ldap_user_base }}"
+GROUP_BASE="{{ ldap_group_base }}"
+
+# ─── Args ─────────────────────────────────────────────────────────────────────
+USERNAME="${1:?Usage: $0 <username>}"
+
+# ─── Xác nhận user tồn tại ───────────────────────────────────────────────────
+if ! ldapsearch -LLL -x -H "$LDAP_URI" \
+       -D "$ADMIN_DN" -w "$ADMIN_PASS" \
+       -b "uid=${USERNAME},${USER_BASE}" -s base "(objectClass=*)" dn 2>/dev/null \
+     | grep -q "^dn:"; then
+  echo "ERROR: user '${USERNAME}' không tồn tại trong LDAP"
+  exit 1
+fi
+
+# ─── Hiển thị thông tin user trước khi xóa ───────────────────────────────────
+USER_INFO="$(ldapsearch -LLL -x -H "$LDAP_URI" \
+  -D "$ADMIN_DN" -w "$ADMIN_PASS" \
+  -b "uid=${USERNAME},${USER_BASE}" -s base "(objectClass=*)" \
+  cn mail gidNumber uidNumber 2>/dev/null)"
+
+echo "User cần xóa:"
+echo "$USER_INFO" | grep -E "^(cn|mail|uidNumber|gidNumber):" | sed 's/^/  /'
+echo ""
+
+# ─── Xác nhận ─────────────────────────────────────────────────────────────────
+read -rp "Xóa user '${USERNAME}'? Thao tác này không thể hoàn tác. [y/N] " CONFIRM
+[[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo "Hủy bỏ."; exit 0; }
+
+# ─── Xóa memberUid khỏi tất cả groups chứa user này ─────────────────────────
+# Bắt buộc xóa trước khi xóa user entry để tránh orphaned memberUid trong groups
+GROUPS_WITH_USER="$(ldapsearch -LLL -x -H "$LDAP_URI" \
+  -D "$ADMIN_DN" -w "$ADMIN_PASS" \
+  -b "$GROUP_BASE" "(memberUid=${USERNAME})" dn 2>/dev/null \
+  | awk '/^dn:/{print $2}')"
+
+if [ -n "$GROUPS_WITH_USER" ]; then
+  while IFS= read -r GROUP_DN; do
+    [ -z "$GROUP_DN" ] && continue
+    ldapmodify -x -H "$LDAP_URI" -D "$ADMIN_DN" -w "$ADMIN_PASS" <<EOF
+dn: ${GROUP_DN}
+changetype: modify
+delete: memberUid
+memberUid: ${USERNAME}
+EOF
+    echo "  Đã xóa memberUid khỏi: ${GROUP_DN}"
+  done <<< "$GROUPS_WITH_USER"
+else
+  echo "  Không có group membership cần dọn."
+fi
+
+# ─── Xóa user entry khỏi LDAP ────────────────────────────────────────────────
+ldapdelete -x -H "$LDAP_URI" \
+  -D "$ADMIN_DN" -w "$ADMIN_PASS" \
+  "uid=${USERNAME},${USER_BASE}"
+echo "  Đã xóa user entry: uid=${USERNAME},${USER_BASE}"
+
+# ─── Xóa khỏi Slurm accounting ───────────────────────────────────────────────
+SLURM_STATUS="sacctmgr not found"
+if command -v sacctmgr &>/dev/null; then
+  if sacctmgr -i delete user "${USERNAME}" cluster="{{ slurm_cluster_name }}" >/dev/null 2>&1; then
+    SLURM_STATUS="OK"
+  else
+    SLURM_STATUS="FAILED — chạy thủ công: sacctmgr -i delete user ${USERNAME}"
+  fi
+fi
+
+echo ""
+echo "================================================="
+echo "  User '${USERNAME}' đã được xóa thành công."
+echo "  Slurm     : ${SLURM_STATUS}"
+echo "  Home dir  : /home/${USERNAME} trên NFS chưa bị xóa."
+echo "  Xóa thủ công: rm -rf /home/${USERNAME}"
+echo "================================================="

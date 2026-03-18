@@ -36,20 +36,6 @@
     mode: '0644'
   notify: restart slurm_exporter
 
-- name: Gather service facts
-  ansible.builtin.service_facts:
-
-- name: Configure firewall for slurm_exporter
-  ansible.posix.firewalld:
-    port: "{{ slurm_exporter_port }}/tcp"
-    permanent: yes
-    state: enabled
-    immediate: yes
-  when:
-    - ansible_facts.services['firewalld.service'] is defined
-    - ansible_facts.services['firewalld.service'].state == 'running'
-  ignore_errors: yes
-
 - name: Enable and start slurm_exporter service
   ansible.builtin.systemd:
     name: "{{ slurm_exporter_service_name }}"

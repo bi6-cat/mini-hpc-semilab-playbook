@@ -1,6 +1,67 @@
 ---
-- name: Phase 1 placeholder for LDAP client role
+- name: Validate LDAP variable contract
+  ansible.builtin.include_role:
+    name: ldap-contract
+
+- name: Install LDAP client packages (RHEL 8 repos)
+  ansible.builtin.dnf:
+    name: "{{ ldap_client_packages }}"
+    state: present
+
+- name: Render sssd.conf
+  ansible.builtin.template:
+    src: sssd.conf.j2
+    dest: "{{ ldap_client_sssd_conf_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: restart sssd
+
+- name: Read current authselect profile
+  ansible.builtin.command: authselect current
+  register: ldap_authselect_current
+  changed_when: false
+  failed_when: false
+
+- name: Enable sssd profile with mkhomedir
+  ansible.builtin.command: authselect select sssd with-mkhomedir --force
+  when: >-
+    'Profile ID: sssd' not in ldap_authselect_current.stdout
+    or 'with-mkhomedir' not in ldap_authselect_current.stdout
+
+- name: Enable and start SSSD service
+  ansible.builtin.systemd:
+    name: sssd
+    state: started
+    enabled: true
+
+- name: Enable and start oddjobd service
+  ansible.builtin.systemd:
+    name: oddjobd
+    state: started
+    enabled: true
+
+- name: Configure AuthorizedKeysCommand
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^AuthorizedKeysCommand\s+'
+    line: 'AuthorizedKeysCommand /usr/bin/sss_ssh_authorizedkeys'
+  notify: restart sshd
+
+- name: Configure AuthorizedKeysCommandUser
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^AuthorizedKeysCommandUser\s+'
+    line: 'AuthorizedKeysCommandUser nobody'
+  notify: restart sshd
+
+- name: Verify LDAP user resolution
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ ldap_client_verify_user }}"
+  register: ldap_getent_test
+  failed_when: false
+
+- name: Show LDAP client lookup status
   ansible.builtin.debug:
-    msg:
-      - "LDAP client role scaffold is active on {{ inventory_hostname }}."
-      - "Phase 2 will configure SSSD/PAM/SSH for LDAP-only auth."
+    msg: "Lookup {{ ldap_client_verify_user }} => {{ 'OK' if ldap_client_verify_user in (ldap_getent_test.ansible_facts.getent_passwd | default({})) else 'pending' }}"

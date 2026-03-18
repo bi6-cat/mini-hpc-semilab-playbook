@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J mem_manual
-#SBATCH -p regular
-#SBATCH -A stu
+#SBATCH -p small
+#SBATCH -A g_stu
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH -c 4

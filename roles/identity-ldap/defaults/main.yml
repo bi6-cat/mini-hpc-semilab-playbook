@@ -1,0 +1,33 @@
+---
+identity_ldap_packages:
+  - openldap-clients
+
+identity_ldap_base_ldif_path: /root/base.ldif
+identity_ldap_groups_ldif_path: /root/groups.ldif
+identity_ldap_test_user_ldif_path: /root/test-user.ldif
+identity_ldap_useradmin_ldif_path: /root/useradmin.ldif
+identity_ldap_runtime_secrets_path: /etc/hpc/user-management-secrets.env
+
+identity_ldap_user_scripts:
+  - src: create-hpc-user.sh.j2
+    dest: /usr/local/bin/create-hpc-user.sh
+  - src: delete-hpc-user.sh.j2
+    dest: /usr/local/bin/delete-hpc-user.sh
+  - src: reset-hpc-user-password.sh.j2
+    dest: /usr/local/bin/reset-hpc-user-password.sh
+
+# Extend shared LDAP contract with identity-seeding requirements.
+ldap_contract_required_vars:
+  - ldap_server_uri
+  - ldap_base_dn
+  - ldap_user_base
+  - ldap_group_base
+  - ldap_bind_dn
+  - ldap_bind_password
+  - ldap_directory_manager_dn
+  - ldap_directory_manager_password
+  - ldap_useradmin_dn
+  - ldap_useradmin_password
+  - smtp_host
+  - smtp_user
+  - smtp_password

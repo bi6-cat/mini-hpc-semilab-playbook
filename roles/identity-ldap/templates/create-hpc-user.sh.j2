@@ -1,0 +1,310 @@
+#!/bin/bash
+# create-hpc-user.sh — Tạo HPC user trong OpenLDAP, Slurm, gửi password qua email
+# Usage: create-hpc-user.sh <username> <group_name> "Full Name" <email>
+#
+# Requires runtime secrets file:
+#   {{ identity_ldap_runtime_secrets_path }}
+
+set -euo pipefail
+
+SECRETS_FILE="{{ identity_ldap_runtime_secrets_path }}"
+if [ -r "$SECRETS_FILE" ]; then
+  set -a
+  . "$SECRETS_FILE"
+  set +a
+fi
+
+# ─── Cấu hình LDAP ───────────────────────────────────────────────────────────
+LDAP_URI="{{ ldap_server_uri }}"
+ADMIN_DN="{{ ldap_useradmin_dn }}"
+ADMIN_PASS="${LDAP_USERADMIN_PASSWORD:?LDAP_USERADMIN_PASSWORD not set}"
+USER_BASE="{{ ldap_user_base }}"
+GROUP_BASE="{{ ldap_group_base }}"
+
+# ─── Monotonic UID counter ────────────────────────────────────────────────────
+UID_COUNTER="{{ hpc_uid_counter_path }}"
+
+# ─── Args ─────────────────────────────────────────────────────────────────────
+USERNAME="${1:?Usage: $0 <username> <group_name> <'Full Name'> <email>}"
+GROUP_NAME="${2:?Missing group_name}"
+GECOS="${3:?Missing full name}"
+EMAIL="${4:?Missing email}"
+HOME_DIR="/home/${USERNAME}"
+SHELL="/bin/bash"
+SN="${GECOS##* }"   # họ = từ cuối của full name
+
+# ─── Validate username: chữ thường, alphanumeric/dot/hyphen/underscore, 3–32 ký tự ──
+if ! [[ "$USERNAME" =~ ^[a-z][a-z0-9._-]{1,30}[a-z0-9]$|^[a-z]{1,3}$ ]]; then
+  echo "ERROR: username không hợp lệ — bắt đầu bằng chữ thường, chỉ [a-z0-9._-], 3–32 ký tự"
+  exit 1
+fi
+
+# ─── Validate email ───────────────────────────────────────────────────────────
+if ! [[ "$EMAIL" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
+  echo "ERROR: email không hợp lệ: '${EMAIL}'"
+  exit 1
+fi
+
+# ─── Kiểm tra user đã tồn tại ────────────────────────────────────────────────
+if ldapsearch -LLL -x -H "$LDAP_URI" \
+     -D "$ADMIN_DN" -w "$ADMIN_PASS" \
+     -b "uid=${USERNAME},${USER_BASE}" -s base "(objectClass=*)" dn 2>/dev/null \
+   | grep -q "^dn:"; then
+  echo "ERROR: user '${USERNAME}' đã tồn tại trong LDAP"
+  exit 1
+fi
+
+# ─── Resolve GID từ LDAP group ────────────────────────────────────────────────
+GID_NUM="$(ldapsearch -LLL -x -H "$LDAP_URI" \
+  -D "$ADMIN_DN" -w "$ADMIN_PASS" \
+  -b "cn=${GROUP_NAME},${GROUP_BASE}" gidNumber 2>/dev/null \
+  | awk '/^gidNumber:/{print $2}')"
+
+if [ -z "$GID_NUM" ]; then
+  echo "ERROR: group '${GROUP_NAME}' không tồn tại trong LDAP"
+  exit 1
+fi
+
+# ─── Cấp phát UID: monotonic counter — không bao giờ tái sử dụng UID đã xóa ──
+mkdir -p "$(dirname "$UID_COUNTER")"
+exec 9>"${UID_COUNTER}.lock"
+flock -x 9
+
+if [ ! -f "$UID_COUNTER" ]; then
+  # Lần đầu chạy: seed từ max UID trong LDAP (hoặc 10000 nếu chưa có user nào)
+  MAX_LDAP="$(ldapsearch -LLL -x -H "$LDAP_URI" \
+    -D "$ADMIN_DN" -w "$ADMIN_PASS" \
+    -b "$USER_BASE" "(uidNumber>=10000)" uidNumber 2>/dev/null \
+    | awk '/^uidNumber:/{print $2}' | sort -n | tail -1)"
+  echo "${MAX_LDAP:-10000}" > "$UID_COUNTER"
+fi
+
+UID_NUM=$(( $(cat "$UID_COUNTER") + 1 ))
+echo "$UID_NUM" > "$UID_COUNTER"
+exec 9>&-   # release lock
+
+# ─── Tạo password 8 ký tự ngẫu nhiên (chữ hoa/thường + số + ký tự đặc biệt) ─
+RAW_PASS="$(LC_ALL=C tr -dc 'A-Za-z0-9!@#$%' < /dev/urandom | head -c 8 || true)"
+
+# ─── Thêm user entry vào LDAP ─────────────────────────────────────────────────
+# Gửi plaintext — 389-DS tự hash theo passwordStorageScheme (PBKDF2-SHA512)
+ldapadd -x -H "$LDAP_URI" -D "$ADMIN_DN" -w "$ADMIN_PASS" <<EOF
+dn: uid=${USERNAME},${USER_BASE}
+objectClass: top
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: ${GECOS}
+sn: ${SN}
+uid: ${USERNAME}
+uidNumber: ${UID_NUM}
+gidNumber: ${GID_NUM}
+homeDirectory: ${HOME_DIR}
+loginShell: ${SHELL}
+gecos: ${GECOS}
+mail: ${EMAIL}
+userPassword: ${RAW_PASS}
+shadowLastChange: $(( $(date +%s) / 86400 ))
+EOF
+
+# ─── Thêm memberUid vào group trong LDAP ─────────────────────────────────────
+ldapmodify -x -H "$LDAP_URI" -D "$ADMIN_DN" -w "$ADMIN_PASS" <<EOF
+dn: cn=${GROUP_NAME},${GROUP_BASE}
+changetype: modify
+add: memberUid
+memberUid: ${USERNAME}
+EOF
+
+# ─── Thêm vào Slurm accounting ───────────────────────────────────────────────
+SLURM_STATUS="sacctmgr not found"
+if command -v sacctmgr &>/dev/null; then
+  if sacctmgr -i add user "${USERNAME}" \
+       account="${GROUP_NAME}" cluster="{{ slurm_cluster_name }}" >/dev/null 2>&1; then
+    SLURM_STATUS="OK"
+  else
+    SLURM_STATUS="FAILED — chạy thủ công: sacctmgr -i add user ${USERNAME} account=${GROUP_NAME}"
+  fi
+fi
+
+# ─── Gửi email qua SMTP có auth ──────────────────────────────────────────────
+MAIL_STATUS="SKIPPED (SMTP_HOST not set)"
+if [ -n "${SMTP_HOST:-}" ]; then
+  MAIL_STATUS="$(python3 - \
+      "$EMAIL" "$USERNAME" "$RAW_PASS" "$GECOS" "$GROUP_NAME" "$UID_NUM" \
+      "{{ domain_name }}" <<'PYEOF'
+import smtplib, ssl, os, sys
+from email.message import EmailMessage
+
+to_addr  = sys.argv[1]
+username = sys.argv[2]
+password = sys.argv[3]
+fullname = sys.argv[4]
+group    = sys.argv[5]
+uid      = sys.argv[6]
+domain   = sys.argv[7]
+
+host      = os.environ['SMTP_HOST']
+port      = int(os.environ.get('SMTP_PORT', '587'))
+smtp_user = os.environ['SMTP_USER']
+smtp_pwd  = os.environ['SMTP_PASSWORD']
+from_addr = os.environ.get('SMTP_FROM', smtp_user)
+
+plain = f"""\
+Xin chào {fullname},
+
+Tài khoản HPC Cluster của bạn đã được tạo thành công.
+
+  Username  : {username}
+  Password  : {password}
+  Nhóm      : {group}
+  UID       : {uid}
+
+Vui lòng đổi mật khẩu ngay sau lần đăng nhập đầu tiên: passwd
+
+Cách đăng nhập:
+  SSH   : ssh {username}@login01.{domain}
+  X2Go  : login01.{domain}  |  session: XFCE
+
+Trân trọng,
+HPC Admin Team — {domain}
+"""
+
+html = f"""\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HPC Account Created</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f8fafc;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f8fafc;padding:40px 10px">
+    <tr>
+      <td align="center">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:600px;background-color:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#0f172a;padding:36px 40px 28px">
+              <div style="display:inline-block;padding:5px 10px;background:rgba(255,255,255,0.1);border-radius:6px;margin-bottom:14px">
+                <span style="color:#60a5fa;font-weight:500;font-size:11px;letter-spacing:1.5px;text-transform:uppercase">System Access</span>
+              </div>
+              <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:500;line-height:1.3">Welcome to HPC Cluster Services</h1>
+              <p style="margin:6px 0 0;color:#94a3b8;font-size:13px">{domain}</p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:36px 40px 0">
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#334155">
+                Dear <strong>{fullname}</strong>,<br>
+                Your high-performance computing account has been successfully provisioned. Please find your credentials and connection details below.
+              </p>
+
+              <!-- Credentials -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;margin-bottom:20px">
+                <tr><td style="padding:20px">
+                  <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                    <tr>
+                      <td style="padding-bottom:8px;color:#94a3b8;font-size:13px;width:90px">Username</td>
+                      <td style="padding-bottom:8px;color:#0f172a;font-family:'Inter',monospace;font-weight:700;font-size:14px">{username}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding-bottom:8px;color:#94a3b8;font-size:13px">Password</td>
+                      <td style="padding-bottom:8px;color:#e11d48;font-family:'Inter',monospace;font-weight:700;font-size:14px">{password}</td>
+                    </tr>
+                    <tr>
+                      <td style="border-top:1px solid #e2e8f0;padding:10px 0 8px;color:#94a3b8;font-size:13px">Group</td>
+                      <td style="border-top:1px solid #e2e8f0;padding:10px 0 8px;color:#334155;font-size:14px">{group}</td>
+                    </tr>
+                    <tr>
+                      <td style="color:#94a3b8;font-size:13px">UID</td>
+                      <td style="color:#334155;font-size:14px">{uid}</td>
+                    </tr>
+                  </table>
+                </td></tr>
+              </table>
+
+              <!-- Warning -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color:#fff7ed;border:1px solid #fed7aa;border-radius:8px;margin-bottom:28px">
+                <tr>
+                  <td style="padding:14px 16px;color:#9a3412;font-size:13px;line-height:1.5">
+                    ⚠ For security, you are <strong>required to change your password</strong> immediately upon first login using the command <code style="background:#ffedd5;color:#9a3412;padding:1px 5px;border-radius:3px;font-size:12px">passwd</code>.
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 14px;font-size:11px;font-weight:500;color:#94a3b8;letter-spacing:1px;text-transform:uppercase">Connection Methods</p>
+
+              <!-- SSH -->
+              <div style="border:1px solid #e2e8f0;border-radius:8px;margin-bottom:12px;padding:14px 16px">
+                <p style="margin:0 0 8px;font-size:11px;font-weight:500;color:#94a3b8;letter-spacing:1px;text-transform:uppercase">Terminal (SSH)</p>
+                <code style="display:block;background:#1e293b;color:#e2e8f0;padding:10px 12px;border-radius:5px;font-size:13px">ssh {username}@login01.{domain}</code>
+              </div>
+
+              <!-- X2Go -->
+              <div style="border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px">
+                <p style="margin:0 0 8px;font-size:11px;font-weight:500;color:#94a3b8;letter-spacing:1px;text-transform:uppercase">Graphical Interface (X2Go)</p>
+                <p style="margin:0;font-size:14px;color:#334155;line-height:1.6">
+                  Host: <span style="font-family:monospace">login01.{domain}</span><br>
+                  Session type: <strong style="color:#3b82f6">XFCE</strong>
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:28px 40px 32px">
+              <p style="margin:0 0 20px;font-size:13px;color:#94a3b8;text-align:center;line-height:1.5">
+                If you experience any issues, please consult the <a href="#" style="color:#3b82f6;text-decoration:none">User Documentation</a> or submit a request via the support ticket system.
+              </p>
+              <div style="border-top:1px solid #f1f5f9;padding-top:18px;text-align:center;color:#cbd5e1;font-size:12px;line-height:1.6">
+                &copy; 2026 HPC Admin Team &bull; {domain}<br>
+                This is an automated message. Please do not reply directly to this email.
+              </div>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+"""
+
+msg = EmailMessage()
+msg['Subject'] = f'[HPC] Tài khoản HPC Cluster — {username}@{domain}'
+msg['From']    = from_addr
+msg['To']      = to_addr
+msg.set_content(plain)
+msg.add_alternative(html, subtype='html')
+
+ctx = ssl.create_default_context()
+with smtplib.SMTP(host, port) as smtp:
+    smtp.ehlo()
+    smtp.starttls(context=ctx)
+    smtp.login(smtp_user, smtp_pwd)
+    smtp.send_message(msg)
+print('OK')
+PYEOF
+  )" || MAIL_STATUS="FAILED — kiểm tra SMTP_* vars trong .env"
+fi
+
+# ─── Tóm tắt ─────────────────────────────────────────────────────────────────
+echo ""
+echo "================================================="
+echo "          USER CREATION SUMMARY"
+echo "================================================="
+echo " Username    : ${USERNAME}"
+echo " Full Name   : ${GECOS}"
+echo " Email       : ${EMAIL}"
+echo " Group       : ${GROUP_NAME} (GID: ${GID_NUM})"
+echo " UID         : ${UID_NUM}"
+echo " Home        : ${HOME_DIR}"
+echo " Password    : ${RAW_PASS}  <- This password is only shown here once."
+echo " Slurm       : ${SLURM_STATUS}"
+echo " Email       : ${MAIL_STATUS}"
+echo "================================================="

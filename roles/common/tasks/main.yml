@@ -48,13 +48,6 @@
     state: started
     enabled: yes
 
-- name: Configure NTP servers
-  ansible.builtin.lineinfile:
-    path: /etc/chrony.conf
-    line: "server {{ item }} iburst"
-  loop: "{{ ntp_servers }}"
-  notify: Restart chronyd
-
 - name: Disable firewalld
   ansible.builtin.systemd:
     name: firewalld
