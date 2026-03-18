@@ -6,6 +6,12 @@ openondemand_enabled: true
 x2go_enabled: true
 xfce_enabled: true
 
+# Chặn swap-thrashing trên login node
+os_disable_swap: true
+os_disable_swap_persist: true
+os_tune_vm_swappiness: true
+os_vm_swappiness: 1
+
 # NFS mount points (NFSv3)
 nfs_mounts:
   - path: "{{ nfs_home }}"

@@ -56,3 +56,25 @@
     regexp: '^Defaults\s+secure_path\s*='
     line: 'Defaults    secure_path = /sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin:/usr/local/sbin'
     validate: '/usr/sbin/visudo -cf %s'
+
+- name: Tune vm.swappiness
+  ansible.posix.sysctl:
+    name: vm.swappiness
+    value: "{{ os_vm_swappiness | string }}"
+    state: present
+    reload: true
+  when: os_tune_vm_swappiness | bool
+
+- name: Disable active swap immediately
+  ansible.builtin.command: swapoff -a
+  changed_when: false
+  when: os_disable_swap | bool
+
+- name: Persistently disable swap in /etc/fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(?!#)(.*\sswap\s+.*)$'
+    replace: '# \1'
+  when:
+    - os_disable_swap | bool
+    - os_disable_swap_persist | bool
