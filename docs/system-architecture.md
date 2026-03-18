@@ -1,7 +1,7 @@
 # System Architecture & Configuration
 # Kiến Trúc & Cấu Hình Hệ Thống HPC Semi-Lab
 
-> **Tên cụm:** `hpc-semi-lab` | **Domain:** `lab.local` | **OS:** Rocky Linux 8
+> **Tên cụm:** `hpc-semi-lab` | **Domain:** `lab.local` | **OS:** Rocky Linux 8 / AlmaLinux 8
 > **Phiên bản tài liệu:** 2.1 | **Cập nhật:** 2026-03-16
 > **Audience:** Admin / IT / Management
 
@@ -143,7 +143,7 @@ Internet / External DNS (8.8.8.8, 1.1.1.1)
 
 | Lớp               | Phần Mềm                   | Phiên Bản / Nguồn                  | Node                 |
 |-------------------|----------------------------|------------------------------------|----------------------|
-| OS                | Rocky Linux                | 8.x (el8)                          | Tất cả               |
+| OS                | Rocky Linux 8 / AlmaLinux 8 | 8.x (el8)                         | Tất cả               |
 | Identity Server   | 389 Directory Server       | 1.4 (RHEL 8 AppStream)             | head01               |
 | Identity Client   | SSSD                       | (RHEL 8 repo)                      | head01, login01, compute* |
 | Job Scheduler     | Slurm (OpenHPC 2.x)        | 23.02 (repos.openhpc.community)    | Tất cả trừ storage01 |
@@ -355,7 +355,7 @@ Scheduler sử dụng `select/cons_tres` với `CR_Core_Memory` — phân bổ t
 - User `hpcadmin` là tài khoản Ansible/admin duy nhất, có `sudo NOPASSWD:ALL` trên tất cả node
 - Nhóm `hpcadmins` trong LDAP cho phép mở rộng quyền admin trong tương lai
 - User thường (`g_lec` / `g_stu` / `g_guest`) **không có sudo** trên bất kỳ node nào
-- Root login qua SSH bị tắt (mặc định Rocky Linux 8)
+- Root login qua SSH bị tắt (mặc định trên RHEL 8 derivatives)
 
 **Scoped Service Account — `cn=hpc-useradmin`:**
 

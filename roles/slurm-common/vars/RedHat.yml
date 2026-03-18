@@ -1,5 +1,5 @@
 ---
-# RedHat/Rocky/CentOS specific Slurm variables
+# RedHat family (Rocky/AlmaLinux/CentOS) Slurm variables
 
 slurm_packages:
   - munge

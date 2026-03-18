@@ -3,7 +3,7 @@
   ansible.builtin.include_role:
     name: ldap-contract
 
-- name: Install LDAP client packages (LTS Rocky repos)
+- name: Install LDAP client packages (RHEL 8 repos)
   ansible.builtin.dnf:
     name: "{{ ldap_client_packages }}"
     state: present

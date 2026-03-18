@@ -41,7 +41,7 @@ slurm_state_dir: /var/spool/slurm/ctld
 slurm_log_dir: /var/log/slurm
 
 # Slurm common
-# OpenHPC 2.x cho Rocky Linux 8 (el8).
+# OpenHPC 2.x cho RHEL 8 derivatives (Rocky/AlmaLinux el8).
 # RPM nằm tại repos.openhpc.community
 slurm_ohpc_release_url: "https://repos.openhpc.community/OpenHPC/2/EL_8/x86_64/ohpc-release-2-1.el8.x86_64.rpm"
 slurm_version: "23.02"
