@@ -221,6 +221,21 @@
   failed_when: __useradmin_aci_groups_read.rc not in [0, 20]
   changed_when: __useradmin_aci_groups_read.rc == 0
 
+- name: Allow users to change their own password
+  ansible.builtin.command: >-
+    ldapmodify -x -H {{ ldap_server_uri }}
+    -D "{{ ldap_directory_manager_dn }}"
+    -w "{{ ldap_directory_manager_password }}"
+  args:
+    stdin: |
+      dn: {{ ldap_user_base }}
+      changetype: modify
+      add: aci
+      aci: (targetattr="userPassword")(version 3.0; acl "Allow users to change own password"; allow(write)(userdn="ldap:///self");)
+  register: __self_password_aci
+  failed_when: __self_password_aci.rc not in [0, 20]
+  changed_when: __self_password_aci.rc == 0
+
 - name: Create /etc/hpc directory for UID counter
   ansible.builtin.file:
     path: "{{ hpc_uid_counter_path | dirname }}"

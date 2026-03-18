@@ -12,6 +12,8 @@ identity_ldap_user_scripts:
     dest: /usr/local/bin/create-hpc-user.sh
   - src: delete-hpc-user.sh.j2
     dest: /usr/local/bin/delete-hpc-user.sh
+  - src: reset-hpc-user-password.sh.j2
+    dest: /usr/local/bin/reset-hpc-user-password.sh
 
 # Extend shared LDAP contract with identity-seeding requirements.
 ldap_contract_required_vars:
