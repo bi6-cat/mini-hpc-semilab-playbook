@@ -97,7 +97,7 @@ slurm_slurmctld_logfile: "{{ slurm_log_dir }}/slurmctld.log"
 slurm_slurmd_logfile: "{{ slurm_log_dir }}/slurmd.log"
 
 slurm_complete_wait: 0
-slurm_return_to_service: 1
+slurm_return_to_service: 2
 slurm_max_job_count: 10000
 slurm_max_array_size: 1000
 

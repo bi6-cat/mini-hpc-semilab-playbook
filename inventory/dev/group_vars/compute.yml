@@ -5,8 +5,8 @@ slurm_node_type: compute
 selinux_state: permissive
 
 # CPU/Memory configuration
-cpu_cores: 12
-memory_gb: 30     
+cpu_cores: 16
+memory_gb: 32     
 
 # Slurm settings (đơn vị tính)
 slurm_cpu_count: "{{ cpu_cores }}"
