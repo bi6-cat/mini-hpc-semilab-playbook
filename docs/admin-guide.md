@@ -15,9 +15,7 @@
 3. [LDAP Operations](#3-ldap-operations)
 4. [NFS / Storage](#4-nfs--storage)
 5. [Slurm Operations](#5-slurm-operations)
-6. [Admin Onboarding](#6-admin-onboarding)
-7. [Monitoring](#7-monitoring)
-8. [Troubleshooting Matrix](#8-troubleshooting-matrix)
+6. [Monitoring](#6-monitoring)
 
 ---
 
@@ -919,119 +917,89 @@ sinfo -n compute01
 
 ---
 
-## 6. Admin Onboarding
+### 5.7 Scale thêm Compute Node (ví dụ `compute03`)
 
-> Section này dùng khi cần **setup một admin mới** hoặc **rebuild control node từ đầu**.
+Mục này dùng khi mở rộng cụm thêm worker mới mà không rebuild toàn bộ.
 
-### 6.1 Yêu Cầu Trước Khi Bắt Đầu
-
-- Đã có quyền truy cập vào một node trong cụm (hoặc quyền trực tiếp lên các node qua console)
-- Có bản sao an toàn của Vault password và file vault secrets
-
-### 6.2 Setup Control Node (head01) Từ Đầu
+**Bước 1 — Thêm host vào inventory**
 
 ```bash
-# Bước 1: Đăng nhập head01 với user root hoặc sudo-able user
-ssh root@head01.lab.local
-
-# Bước 2: Tạo user hpcadmin nếu chưa có
-useradd -m -s /bin/bash -G wheel hpcadmin
-passwd hpcadmin
-
-# Bước 3: Cấu hình sudo NOPASSWD cho hpcadmin
-echo "hpcadmin  ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/hpcadmin
-chmod 440 /etc/sudoers.d/hpcadmin
-
-# (Khuyến nghị) Validate cú pháp sudoers
-visudo -cf /etc/sudoers.d/hpcadmin
-
-# Bước 4: Chuyển sang user hpcadmin
-su - hpcadmin
-
-# Bước 5: Tạo SSH key
-ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
-
-# Bước 6: Cài Ansible
-sudo dnf install -y epel-release git
-sudo dnf install -y ansible
-ansible-galaxy collection install ansible.posix community.general
-
-# Bước 7: Clone repo
-git clone <repo_url> ~/ansible/mini-hpc-semilab-playbook
-cd ~/ansible/mini-hpc-semilab-playbook
-
-# Bước 8: Tạo/chỉnh sửa vault secrets
-ansible-vault create inventory/dev/group_vars/all/vault.yml
+# Sửa inventory
+vim inventory/dev/hosts.yml
 ```
 
-> **Security note:** `NOPASSWD:ALL` phù hợp cho môi trường lab/dev hoặc automation account.
-> Với production, nên giới hạn command trong sudoers thay vì mở toàn bộ `ALL=(ALL) NOPASSWD:ALL`.
+Thêm node mới vào group `compute`:
 
-### 6.3 Phân Phối SSH Key Đến Remote Nodes
+```yaml
+compute:
+  hosts:
+    compute01:
+      ansible_host: 192.168.56.30
+    compute02:
+      ansible_host: 192.168.56.31
+    compute03:
+      ansible_host: 192.168.56.32
+```
 
-SSH key của `hpcadmin` trên head01 cần có mặt trong `authorized_keys` trên tất cả remote nodes.
+**Bước 2 — Cập nhật danh sách node trong Slurm vars**
+
+Thêm sshkey của head01 vào `compute03` (nếu chưa có) để Ansible có thể kết nối khi deploy.
 
 ```bash
-# Lấy public key
-cat ~/.ssh/id_ed25519.pub
-# ssh-ed25519 AAAA... hpcadmin@head01.lab.local
-
-# Cách 1: ssh-copy-id (nếu đã có password access)
-for node in login01 compute01 compute02 storage01; do
-  ssh-copy-id -i ~/.ssh/id_ed25519.pub hpcadmin@${node}.lab.local
-done
-
-# Cách 2: Manual (khi không có password auth)
-# Đăng nhập từng node, thêm public key vào ~/.ssh/authorized_keys
-ssh root@login01 "
-  mkdir -p /home/hpcadmin/.ssh
-  echo 'ssh-ed25519 AAAA...' >> /home/hpcadmin/.ssh/authorized_keys
-  chown -R hpcadmin:hpcadmin /home/hpcadmin/.ssh
-  chmod 700 /home/hpcadmin/.ssh
-  chmod 600 /home/hpcadmin/.ssh/authorized_keys
-"
+vim inventory/dev/group_vars/all/vars.yml
 ```
 
-### 6.4 Kiểm Tra Quyền Truy Cập Toàn Cụm
+- Thêm `compute03` vào `slurm_compute_nodes`
+- Đổi `nodes: "compute[01-02]"` thành `nodes: "compute[01-03]"` cho các partition
+- Tăng `max_nodes` từ `2` → `3` (nếu muốn partition dùng đủ 3 node)
+
+**Bước 3 — Bootstrap node mới**
 
 ```bash
-cd ~/ansible/mini-hpc-semilab-playbook
-
-# Test SSH connection và sudo
-ansible all -m ping
-ansible all -m command -a "sudo id" --become
-
-# Test playbook syntax
-ansible-playbook playbooks/00-bootstrap.yml --syntax-check
-ansible-playbook playbooks/01-identity.yml --syntax-check
+ansible-playbook -i inventory/dev/hosts.yml playbooks/00-bootstrap.yml --limit compute03 --ask-vault-pass
 ```
 
-### 6.5 Thêm Admin IT Mới
-
-Khi thêm một admin IT mới cần quyền quản trị cụm:
+**Bước 4 — Cấu hình identity + storage cho node mới**
 
 ```bash
-# 1. Thêm public key của admin mới vào authorized_keys trên head01
-echo "ssh-ed25519 AAAA... newadmin@workstation" >> ~/.ssh/authorized_keys
-
-# 2. Tùy chọn: thêm vào group hpcadmins trong LDAP
-ldapmodify -x -H ldap://127.0.0.1:389 \
-  -D "cn=Directory Manager" -w "$LDAP_BIND_PASSWORD" <<EOF
-dn: cn=hpcadmins,ou=groups,dc=lab,dc=local
-changetype: modify
-add: memberUid
-memberUid: newadmin
-EOF
-
-# 3. Tạo user hpcadmin trên remote nodes nếu dùng account riêng
-# (tùy chính sách: cluster này dùng chung 1 user hpcadmin)
+ansible-playbook -i inventory/dev/hosts.yml playbooks/01-identity.yml --limit compute03 --ask-vault-pass
+ansible-playbook -i inventory/dev/hosts.yml playbooks/02-storage.yml --limit compute03 --ask-vault-pass
 ```
+
+**Bước 5 — Regenerate cấu hình Slurm ở head và cài slurmd cho compute03**
+
+```bash
+ansible-playbook -i inventory/dev/hosts.yml playbooks/04-slurm-head.yml --ask-vault-pass
+ansible-playbook -i inventory/dev/hosts.yml playbooks/05-slurm-compute.yml --limit compute03 --ask-vault-pass
+```
+
+**Bước 6 — Cập nhật monitoring**
+
+```bash
+ansible-playbook -i inventory/dev/hosts.yml playbooks/06-monitoring.yml --ask-vault-pass
+```
+
+`06-monitoring.yml` cài `node-exporter` theo group `compute`, nên `compute03` sẽ được thêm tự động sau khi inventory cập nhật.
+
+**Bước 7 — Verify**
+
+```bash
+ansible compute03 -m ping
+ssh head01 sinfo
+ssh head01 scontrol show node compute03 | grep -E "State|CPUTot|RealMemory"
+curl -fsS http://head01.lab.local:9090/api/v1/targets | jq '.data.activeTargets[] | select(.labels.job=="node-exporter") | .discoveredLabels.__address__'
+```
+
+Kỳ vọng:
+- `compute03` xuất hiện trong `sinfo`
+- Trạng thái node `IDLE` hoặc `MIXED`
+- Prometheus có target `node-exporter` của `compute03`
 
 ---
 
-## 7. Monitoring
+## 6. Monitoring
 
-### 7.1 Kiểm Tra Nhanh Trạng Thái Stack
+### 6.1 Kiểm Tra Nhanh Trạng Thái Stack
 
 ```bash
 # Trên head01 — kiểm tra tất cả monitoring services
@@ -1052,7 +1020,7 @@ done
 curl -fsS http://127.0.0.1:9341/metrics | grep slurm_nodes_total
 ```
 
-### 7.2 Kiểm Tra Prometheus Targets
+### 6.2 Kiểm Tra Prometheus Targets
 
 ```bash
 # Xem trạng thái scrape targets (all UP/DOWN)
@@ -1063,7 +1031,7 @@ curl -fsS 'http://127.0.0.1:9090/api/v1/targets' \
 
 Hoặc mở trình duyệt: `http://head01.lab.local:9090/targets`
 
-### 7.3 Query Metrics Cơ Bản (PromQL)
+### 6.3 Query Metrics Cơ Bản (PromQL)
 
 ```bash
 # CPU usage mỗi node (5 phút)
@@ -1084,7 +1052,7 @@ slurm_job_states{states="running"}
 slurm_node_states
 ```
 
-### 7.4 Grafana — Truy Cập & Thêm Dashboard
+### 6.4 Grafana — Truy Cập & Thêm Dashboard
 
 **Truy cập:**
 ```
@@ -1108,7 +1076,7 @@ URL: http://head01.lab.local:3000
 4. Nhập PromQL query → **Apply**
 5. **Save dashboard**
 
-### 7.5 Alert Rules
+### 6.5 Alert Rules
 
 > **Alert rules / Alertmanager chưa implement.**
 >
@@ -1117,7 +1085,7 @@ URL: http://head01.lab.local:3000
 > - _Alert rules: node down, disk > 80%, CPU > 90%, Slurm node drain_
 
 
-### 7.6 Re-Deploy Stack Monitoring
+### 6.6 Re-Deploy Stack Monitoring
 
 ```bash
 # Toàn bộ monitoring
