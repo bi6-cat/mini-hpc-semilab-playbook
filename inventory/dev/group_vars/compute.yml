@@ -6,7 +6,7 @@ selinux_state: permissive
 
 # CPU/Memory configuration
 cpu_cores: 16
-memory_gb: 32     
+memory_gb: 32
 
 # Slurm settings (đơn vị tính)
 slurm_cpu_count: "{{ cpu_cores }}"

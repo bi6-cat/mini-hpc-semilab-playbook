@@ -129,7 +129,24 @@ test_ssh_connectivity() {
 
 test_ntp_synced() {
   local host="$1"
-  run_host_cmd "${host}" "timedatectl show --property=NTPSynchronized --value | grep -Fxq yes"
+  local retries="${NTP_CHECK_RETRIES:-6}"
+  local interval_sec="${NTP_CHECK_INTERVAL_SEC:-5}"
+  local attempt=1
+
+  while (( attempt <= retries )); do
+    if run_host_cmd "${host}" "timedatectl show --property=NTPSynchronized --value | grep -Fxq yes"; then
+      return 0
+    fi
+
+    if run_host_cmd "${host}" "systemctl is-active --quiet chronyd && chronyc tracking 2>/dev/null | grep -Eq '^Leap status\\s*:\\s*Normal$'"; then
+      return 0
+    fi
+
+    sleep "${interval_sec}"
+    attempt=$((attempt + 1))
+  done
+
+  return 1
 }
 
 test_identity_lookup() {
@@ -161,7 +178,12 @@ test_slurm_nodes() {
     local state
     state="$(echo "${output}" | awk -F'|' -v h="${host}" '$1==h {print $2}' | head -n1)"
     [[ -n "${state}" ]] || return 1
-    [[ "${state}" != *down* && "${state}" != *drain* && "${state}" != *fail* ]] || return 1
+    local state_lc
+    state_lc="$(echo "${state}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "${state_lc}" == *down* || "${state_lc}" == *drain* || "${state_lc}" == *fail* || "${state_lc}" == *inval* || "${state_lc}" == *unk* ]]; then
+      echo "Unhealthy Slurm node state: ${host}=${state}" >&2
+      return 1
+    fi
   done
 }
 

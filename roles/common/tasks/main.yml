@@ -42,11 +42,65 @@
   ansible.builtin.command: timedatectl set-timezone "{{ timezone }}"
   when: current_timezone.stdout != timezone
 
-- name: Configure chronyd
+- name: Resolve head node address for cluster timesync
+  ansible.builtin.set_fact:
+    timesync_head_ip: "{{ hostvars[timesync_head_host]['ansible_host'] | default(timesync_head_host) }}"
+
+- name: Configure chrony on head node (upstream + serve cluster)
+  ansible.builtin.copy:
+    dest: /etc/chrony.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      # === Managed by Ansible – roles/common ===
+      {% for ip in ntp_servers %}
+      server {{ ip }} iburst
+      {% endfor %}
+
+      driftfile /var/lib/chrony/drift
+      allow {{ timesync_cluster_network }}
+      local stratum 10
+      makestep 1.0 3
+      rtcsync
+      logdir /var/log/chrony
+      log tracking measurements statistics
+  when: inventory_hostname == timesync_head_host
+  notify: restart chronyd
+
+- name: Configure chrony on non-head nodes (use head as NTP)
+  ansible.builtin.copy:
+    dest: /etc/chrony.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      # === Managed by Ansible – roles/common ===
+      server {{ timesync_head_ip }} iburst prefer
+
+      driftfile /var/lib/chrony/drift
+      makestep 1.0 3
+      rtcsync
+      logdir /var/log/chrony
+      log tracking measurements statistics
+  when: inventory_hostname != timesync_head_host
+  notify: restart chronyd
+
+- name: Ensure chronyd is enabled and running
   ansible.builtin.systemd:
     name: chronyd
     state: started
     enabled: yes
+
+- name: Ensure timedatectl NTP mode is enabled
+  ansible.builtin.command: timedatectl set-ntp true
+  changed_when: false
+  failed_when: false
+
+- name: Force immediate chrony step (best effort)
+  ansible.builtin.command: chronyc -a makestep
+  changed_when: false
+  failed_when: false
 
 - name: Disable firewalld
   ansible.builtin.systemd:

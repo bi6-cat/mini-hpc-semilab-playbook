@@ -79,6 +79,7 @@ slurm_accounting_storage_port: 6819
 slurm_scheduler_type: sched/backfill
 slurm_select_type: select/cons_tres
 slurm_select_type_parameters: CR_Core_Memory
+slurm_slurmd_parameters: config_overrides
 
 slurm_slurmctld_port: 6817
 slurm_slurmd_port: 6818

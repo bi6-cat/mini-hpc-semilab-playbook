@@ -1,2 +1,7 @@
 ntp_servers:
-  - 1.asia.pool.ntp.org
+  - 216.239.35.0
+  - 216.239.35.4
+  - 162.159.200.1
+
+timesync_head_host: "{{ (groups['head'] | first) | default('head01') }}"
+timesync_cluster_network: "{{ cluster_network_cidr | default('192.168.56.0/24') }}"

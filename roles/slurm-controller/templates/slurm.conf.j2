@@ -66,6 +66,9 @@ MaxArraySize={{ slurm_max_array_size }}
 # PROCESS TRACKING
 ProctrackType=proctrack/cgroup
 TaskPlugin=task/cgroup
+{% if slurm_slurmd_parameters is defined and slurm_slurmd_parameters | length > 0 %}
+SlurmdParameters={{ slurm_slurmd_parameters }}
+{% endif %}
 
 # MPI
 MpiDefault=none
